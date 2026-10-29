@@ -3,7 +3,7 @@
 Tienda Android privada para distribuir aplicaciones propias. GitHub será el backend
 inicial de distribución; no se utilizarán Firebase ni un backend propio.
 
-**Estado: RS-00 — Fundaciones.** Solo existe una pantalla de comprobación de Compose.
+**Estado: RS-01 — RobStyle + navegación (pendiente de cierre).** Home, Detalle y Ajustes con Navigation Compose.
 No hay catálogo, red, descargas, instalaciones ni actualizaciones.
 
 ## Stack y requisitos
@@ -32,7 +32,7 @@ docs/              Decisiones y evidencia de RS-00
 Un único módulo `app`. La entrada Compose separa Activity, pantalla y tema.
 Cuando exista estado de pantalla, se incorporarán ViewModel, StateFlow y recolección
 con ciclo de vida; ahora no hay estado mutable que justifique esas piezas.
-Tampoco hay rutas, módulos `data`/`domain` ni servicios anticipados.
+Las rutas son `home`, `settings` y `app/{appId}`. No hay módulos `data`/`domain` ni servicios anticipados.
 
 ## Variantes
 
@@ -61,8 +61,8 @@ Desde la raíz del repositorio:
 ```
 
 `test` ejecuta pruebas de ambas variantes mediante Robolectric sobre API 28.
-Comprueban identidad, nombre, sufijo DEV, Activity de entrada y creación del
-contenedor Compose. No requieren emulador y no sustituyen una prueba visual en
+Comprueban identidad, nombre, sufijo DEV, recursos launcher, Activity, render,
+navegación y estados visuales. No requieren emulador y no sustituyen una prueba visual en
 dispositivo. La primera ejecución necesita acceso a Google Maven, Maven Central y
 las distribuciones Gradle.
 
@@ -72,10 +72,10 @@ La CI ejecuta tests, lint y compilaciones Debug/Release, sin publicación ni fir
 
 ## RobStyle y fases siguientes
 
-`ui/robstyle` centraliza colores, tipografía, formas y dimensiones. RS-00 utiliza
-los valores base de Material 3 y respeta el modo claro/oscuro del sistema.
-La identidad definitiva de RobStyle y los iconos se validarán en
-**RS-01 — RobStyle + navegación**, tomando como referencia RobGit.
+`ui/robstyle` aplica una paleta azul profundo/cian, tipografía, formas y componentes
+reutilizables sobre Material 3. El tema es oscuro por defecto. Previews incluyen
+pantallas compactas, grandes y texto ampliado. Consulta [docs/RS-01.md](docs/RS-01.md)
+para navegación, estados, validaciones y bloqueo del PNG oficial.
 
 Fases posteriores incorporarán catálogo e integración GitHub, consulta de apps
 instaladas, descargas, instalaciones y actualizaciones. Su orden y alcance se
