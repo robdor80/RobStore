@@ -3,7 +3,7 @@
 Tienda Android privada para distribuir aplicaciones propias. GitHub será el backend
 inicial de distribución; no se utilizarán Firebase ni un backend propio.
 
-**Estado: RS-01 — RobStyle + navegación (pendiente de cierre).** Home, Detalle y Ajustes con Navigation Compose.
+**Estado: RS-01 — RobStyle + navegación (preparada para auditoría).** Home, Detalle y Ajustes con Navigation Compose.
 No hay catálogo, red, descargas, instalaciones ni actualizaciones.
 
 ## Stack y requisitos
@@ -44,8 +44,9 @@ Las rutas son `home`, `settings` y `app/{appId}`. No hay módulos `data`/`domain
 Pueden convivir instaladas. Debug utiliza la firma de desarrollo automática del
 SDK; no hay firma privada Release configurada ni claves versionadas.
 `assembleRelease` produce un APK **sin firmar**, que requiere una firma antes de
-instalarlo. Los iconos son marcadores provisionales, con recurso independiente y
-una D provisional en Debug.
+instalarlo. Los iconos utilizan el PNG oficial con transparencia; Debug añade
+un badge D mediante recursos exclusivos de `src/debug`. Véase la
+[comparativa de iconos](docs/assets/RS-01-launcher-preview.png).
 
 ## Compilación y pruebas
 
@@ -75,7 +76,7 @@ La CI ejecuta tests, lint y compilaciones Debug/Release, sin publicación ni fir
 `ui/robstyle` aplica una paleta azul profundo/cian, tipografía, formas y componentes
 reutilizables sobre Material 3. El tema es oscuro por defecto. Previews incluyen
 pantallas compactas, grandes y texto ampliado. Consulta [docs/RS-01.md](docs/RS-01.md)
-para navegación, estados, validaciones y bloqueo del PNG oficial.
+para navegación, estados, validaciones y generación reproducible del icono oficial.
 
 Fases posteriores incorporarán catálogo e integración GitHub, consulta de apps
 instaladas, descargas, instalaciones y actualizaciones. Su orden y alcance se
