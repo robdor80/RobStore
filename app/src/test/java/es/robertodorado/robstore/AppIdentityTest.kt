@@ -43,6 +43,9 @@ class AppIdentityTest {
             val content = activity.findViewById<ViewGroup>(android.R.id.content)
 
             assertTrue(content.getChildAt(0) is ComposeView)
+            val bars = androidx.core.view.WindowInsetsControllerCompat(activity.window, activity.window.decorView)
+            org.junit.Assert.assertFalse(bars.isAppearanceLightStatusBars)
+            org.junit.Assert.assertFalse(bars.isAppearanceLightNavigationBars)
         }
     }
 
