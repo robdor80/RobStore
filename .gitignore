@@ -1,0 +1,37 @@
+# Gradle / Android
+.gradle/
+**/build/
+local.properties
+.externalNativeBuild/
+.cxx/
+*.apk
+*.aab
+*.apks
+
+# IDE / sistema
+.idea/
+*.iml
+*.iws
+*.ipr
+captures/
+.DS_Store
+
+# Herramientas y cachés locales de Cloud
+.cloud/
+.kotlin/
+
+# Firma y secretos
+*.jks
+*.keystore
+*.p12
+*.pfx
+keystore.properties
+signing.properties
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+secrets.properties
+secrets/
+.secrets/
