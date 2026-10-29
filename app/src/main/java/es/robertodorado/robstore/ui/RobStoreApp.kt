@@ -2,19 +2,20 @@ package es.robertodorado.robstore.ui
 
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.grid.*
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Home
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavHostController
@@ -53,8 +54,9 @@ fun RobStoreApp(nav: NavHostController = rememberNavController(), state: Catalog
 
 @Composable
 private fun ScreenFrame(title: String, onBack: (() -> Unit)? = null, onSettings: (() -> Unit)? = null,
+    onRefresh: (() -> Unit)? = null, busy: Boolean = false,
     content: @Composable BoxScope.() -> Unit) {
-    Scaffold(topBar = { RobTopBar(title, onBack != null, { onBack?.invoke() }, onSettings) }) { padding ->
+    Scaffold(topBar = { RobTopBar(title, onBack != null, { onBack?.invoke() }, onSettings, onRefresh, busy) }) { padding ->
         Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.TopCenter, content = content)
     }
 }
@@ -72,49 +74,104 @@ private fun Screen(title: String, onBack: (() -> Unit)? = null,
 @Composable
 fun HomeScreen(onSettings: () -> Unit, state: CatalogState = CatalogState(loading = false),
     onRefresh: () -> Unit = {}, onOpenApp: (Long) -> Unit = {}) {
-    ScreenFrame(stringResource(R.string.app_name), onSettings = onSettings) {
-        LazyColumn(Modifier.widthIn(max = RobStyleDimensions.maxContentWidth).fillMaxWidth(),
-            contentPadding = PaddingValues(RobStyleDimensions.screenPadding),
-            verticalArrangement = Arrangement.spacedBy(RobStyleDimensions.contentSpacing)) {
-            item {
-                Text(stringResource(R.string.home_heading), style = MaterialTheme.typography.headlineLarge)
-                Text(stringResource(R.string.catalog_origin), style = MaterialTheme.typography.bodyLarge,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+    val busy = state.loading || state.refreshing
+    val refresh = { if (!busy) onRefresh() }
+    ScreenFrame(stringResource(R.string.app_name), onSettings = onSettings, onRefresh = refresh, busy = busy) {
+        RobCatalogGrid(state, refresh, onOpenApp)
+    }
+}
+
+@Composable
+private fun RobCatalogGrid(state: CatalogState, onRefresh: () -> Unit, onOpenApp: (Long) -> Unit) {
+    val fontScale = LocalDensity.current.fontScale.coerceAtLeast(1f)
+    LazyVerticalGrid(
+        columns = GridCells.Adaptive(RobStyleDimensions.appTileMinWidth * fontScale),
+        modifier = Modifier.widthIn(max = RobStyleDimensions.maxCatalogWidth).fillMaxSize().testTag("catalog_grid"),
+        contentPadding = PaddingValues(RobStyleDimensions.catalogPadding),
+        horizontalArrangement = Arrangement.spacedBy(RobStyleDimensions.contentSpacing),
+        verticalArrangement = Arrangement.spacedBy(RobStyleDimensions.contentSpacing),
+    ) {
+        item(key = "heading", span = { GridItemSpan(maxLineSpan) }) {
+            Text(stringResource(R.string.catalog), style = MaterialTheme.typography.titleLarge)
+        }
+        // A snapshot, including a valid empty one, takes priority over transient loading/errors.
+        if (state.snapshot != null) {
+            if (state.snapshot.apps.isEmpty()) item(key = "empty", span = { GridItemSpan(maxLineSpan) }) {
+                RobStatus(RobVisualState.Empty)
             }
-            item { SyncStatus(state) }
-            item {
-                RobPrimaryButton(stringResource(R.string.refresh), enabled = !state.loading && !state.refreshing, onClick = onRefresh)
-                Text(stringResource(R.string.refresh_policy), color = MaterialTheme.colorScheme.onSurfaceVariant)
+            items(state.snapshot.apps, key = { it.repositoryId }) { app ->
+                RobAppTile(app, onClick = { onOpenApp(app.repositoryId) })
             }
-            item { RobSectionHeader(stringResource(R.string.catalog)) }
-            when {
-                state.loading || (state.snapshot == null && state.refreshing) -> item { RobStatus(RobVisualState.Loading) }
-                state.snapshot == null && state.failed -> item { RobStatus(RobVisualState.Error, onRetry = onRefresh) }
-                state.snapshot?.apps.isNullOrEmpty() -> item { RobStatus(RobVisualState.Empty) }
-                else -> items(state.snapshot.apps, key = { it.repositoryId }) { app ->
-                    RobCard(onClick = { onOpenApp(app.repositoryId) }) {
-                        AppIcon(app)
-                        Text(app.name, style = MaterialTheme.typography.titleLarge)
-                        Text(stringResource(R.string.version_value, app.release.tag))
-                        if (app.description.isNotBlank()) Text(app.description, maxLines = 3, overflow = TextOverflow.Ellipsis)
-                        Text(stringResource(R.string.available_later), color = MaterialTheme.colorScheme.primary)
-                    }
+        } else {
+            item(key = "status", span = { GridItemSpan(maxLineSpan) }) {
+                when {
+                    state.loading || state.refreshing -> RobStatus(RobVisualState.Loading)
+                    state.failed -> RobStatus(RobVisualState.Error, onRetry = onRefresh)
+                    else -> RobStatus(RobVisualState.Empty)
                 }
+            }
+        }
+        item(key = "sync", span = { GridItemSpan(maxLineSpan) }) { RobSyncIndicator(state) }
+    }
+}
+
+@Composable
+internal fun RobAppTile(app: CatalogApp, onClick: () -> Unit) {
+    OutlinedCard(onClick = onClick, modifier = Modifier.fillMaxWidth().testTag("app_${app.repositoryId}"),
+        shape = MaterialTheme.shapes.medium,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+        colors = CardDefaults.outlinedCardColors(containerColor = MaterialTheme.colorScheme.surface)) {
+        Column(Modifier.fillMaxWidth().padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            AppIcon(app, size = RobStyleDimensions.catalogIconSize)
+            Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(app.name, style = MaterialTheme.typography.titleMedium, minLines = 2, maxLines = 2,
+                    overflow = TextOverflow.Ellipsis)
+                Text(app.release.tag, style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
         }
     }
 }
 
 @Composable
-private fun SyncStatus(state: CatalogState) {
-    if (state.refreshing) {
-        if (state.snapshot != null) CircularProgressIndicator()
-        Text(stringResource(R.string.refreshing))
+internal fun RobSyncIndicator(state: CatalogState, technical: Boolean = false) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        if (state.refreshing || state.loading) {
+            if (state.snapshot != null) {
+                LinearProgressIndicator(Modifier.fillMaxWidth())
+                Text(stringResource(R.string.refreshing), style = MaterialTheme.typography.bodySmall)
+            }
+        }
+        state.snapshot?.let { snapshot ->
+            displayDate(snapshot.syncedAt)?.let {
+                Text(stringResource(R.string.last_sync, it), style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+        if (state.stale) Text(stringResource(R.string.stale_cache), style = MaterialTheme.typography.bodySmall)
+        if (state.failed && state.snapshot != null) Text(stringResource(R.string.cached_after_failure),
+            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+        if (technical) {
+            Text(stringResource(R.string.current_state), style = MaterialTheme.typography.labelLarge)
+            Text(stringResource(when {
+                state.loading -> R.string.loading
+                state.refreshing -> R.string.refreshing
+                state.failed -> R.string.error
+                state.snapshot != null -> R.string.catalog_ready
+                else -> R.string.no_sync
+            }))
+        }
+        if (technical || state.message != null) {
+            displayDate(state.nextRefreshAt)?.let {
+                Text(stringResource(R.string.next_refresh, it), style = MaterialTheme.typography.bodySmall)
+            }
+        }
+        // Home uses a short explanation; raw diagnostics remain readable in Settings.
+        if (!technical && state.message != null && !state.failed) {
+            Text(stringResource(R.string.refresh_limited), style = MaterialTheme.typography.bodySmall)
+        }
     }
-    state.snapshot?.let { Text(stringResource(R.string.last_sync, displayDate(it.syncedAt))) }
-    if (state.stale) Text(stringResource(R.string.stale_cache), color = MaterialTheme.colorScheme.tertiary)
-    if (state.failed && state.snapshot != null) Text(stringResource(R.string.cached_after_failure))
-    state.message?.let { Text(it, color = MaterialTheme.colorScheme.onSurfaceVariant) }
 }
 
 @Composable
@@ -122,20 +179,25 @@ fun SettingsScreen(onBack: () -> Unit, state: CatalogState = CatalogState(loadin
     Screen(stringResource(R.string.settings), onBack = onBack) {
         RobCard {
             RobSectionHeader(stringResource(R.string.origin_heading))
-            Text(stringResource(R.string.catalog_origin))
+            Text(stringResource(R.string.origin_owner, CatalogPolicy.OWNER))
+            Text(stringResource(R.string.origin_topic, CatalogPolicy.TOPIC))
             Text(stringResource(R.string.stable_channel))
         }
         RobCard {
             RobSectionHeader(stringResource(R.string.sync_heading))
-            SyncStatus(state)
+            RobSyncIndicator(state, technical = true)
             if (state.snapshot == null) Text(stringResource(R.string.no_sync))
             Text(stringResource(R.string.refresh_policy))
             Text(stringResource(R.string.offline_policy))
         }
-        state.snapshot?.diagnostics?.takeIf { it.isNotEmpty() }?.let { diagnostics ->
-            RobCard {
-                RobSectionHeader(stringResource(R.string.diagnostics_heading))
+        RobInfoSection(stringResource(R.string.diagnostics)) {
+            state.message?.let { Text(it) }
+            state.snapshot?.diagnostics?.takeIf { it.isNotEmpty() }?.let { diagnostics ->
+                Text(stringResource(R.string.diagnostics_heading))
                 diagnostics.forEach { Text(it, style = MaterialTheme.typography.bodySmall) }
+            }
+            if (state.message == null && state.snapshot?.diagnostics.isNullOrEmpty()) {
+                Text(stringResource(R.string.no_diagnostics))
             }
         }
     }
@@ -147,51 +209,71 @@ fun AppDetailScreen(onBack: () -> Unit, app: CatalogApp? = null, state: CatalogS
         if (app == null) {
             Text(stringResource(R.string.app_not_available))
         } else {
-            SyncStatus(state)
-            RobCard {
-                AppIcon(app)
-                Text(app.name, style = MaterialTheme.typography.headlineLarge)
-                Text(stringResource(R.string.version_value, app.release.tag))
-                Text(stringResource(R.string.published_value, displayDate(java.time.Instant.parse(app.release.publishedAt).toEpochMilli())))
-                Text(stringResource(R.string.package_value, app.packageName))
-                Text(stringResource(R.string.available_later), color = MaterialTheme.colorScheme.primary)
-                RobPrimaryButton(stringResource(R.string.install_later), enabled = false, onClick = {})
-            }
-            RobCard {
-                RobSectionHeader(stringResource(R.string.description))
+            RobDetailHeader(app)
+            RobInfoSection(stringResource(R.string.description)) {
                 Text(app.description.ifBlank { stringResource(R.string.no_description) })
-                Text(stringResource(R.string.repository_value, app.repositoryUrl))
             }
-            RobCard {
-                RobSectionHeader(stringResource(R.string.changelog))
-                // Plain text only: no execution, HTML or remote embedded images.
+            RobInfoSection(stringResource(R.string.changelog)) {
+                // Plain text only: no HTML, active Markdown or remote embedded resources.
                 Text(app.release.notes.ifBlank { stringResource(R.string.no_changelog) })
             }
-            RobCard {
-                RobSectionHeader(stringResource(R.string.apk_heading))
+            RobInfoSection(stringResource(R.string.apk_heading)) {
+                Text(stringResource(R.string.apk_unverified), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(stringResource(R.string.package_value, app.packageName))
+                Text(stringResource(R.string.repository_name, app.repositoryName))
+                Text(stringResource(R.string.repository_value, app.repositoryUrl))
                 Text(stringResource(R.string.apk_name_value, app.apk.name))
-                Text(pluralStringResource(R.plurals.apk_size_value, app.apk.size.toInt(), app.apk.size))
+                Text(stringResource(R.string.apk_size_readable, displayApkSize(app.apk.size)))
                 Text(stringResource(R.string.apk_url_value, app.apk.downloadUrl))
                 app.apk.sha256?.let { Text(stringResource(R.string.apk_digest_value, it)) }
-                Text(stringResource(R.string.apk_unverified))
             }
+            RobSyncIndicator(state)
         }
     }
 }
 
 @Composable
-private fun AppIcon(app: CatalogApp) {
-    val loader = LocalCatalogIcons.current
-    val bitmap by produceState<android.graphics.Bitmap?>(null, app.icon, loader) {
-        value = app.icon?.let { loader?.load(it) }
-    }
-    val image = bitmap
-    if (image != null) Image(image.asImageBitmap(), contentDescription = stringResource(R.string.app_icon, app.name), modifier = Modifier.size(64.dp))
-    else Surface(shape = MaterialTheme.shapes.small, color = MaterialTheme.colorScheme.secondaryContainer) {
-        Icon(Icons.Default.Home, contentDescription = stringResource(R.string.fallback_icon, app.name),
-            modifier = Modifier.padding(12.dp).size(40.dp), tint = MaterialTheme.colorScheme.primary)
+internal fun RobDetailHeader(app: CatalogApp) {
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+        AppIcon(app, size = RobStyleDimensions.detailIconSize)
+        Text(app.name, style = MaterialTheme.typography.headlineLarge)
+        Text(stringResource(R.string.version_value, app.release.tag), color = MaterialTheme.colorScheme.primary)
+        displayReleaseDate(app.release.publishedAt)?.let { Text(stringResource(R.string.published_value, it),
+            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+        RobCard {
+            RobPrimaryButton(stringResource(R.string.install_later), enabled = false, onClick = {})
+            Text(stringResource(R.string.available_later), style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
     }
 }
 
-private fun displayDate(time: Long): String = java.time.Instant.ofEpochMilli(time).atZone(java.time.ZoneId.systemDefault())
-    .format(java.time.format.DateTimeFormatter.ofPattern("dd/MM/yyyy HH:mm z", java.util.Locale.getDefault()))
+@Composable
+internal fun RobInfoSection(title: String, content: @Composable ColumnScope.() -> Unit) {
+    RobCard {
+        RobSectionHeader(title)
+        SelectionContainer {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp), content = content)
+        }
+    }
+}
+
+@Composable
+internal fun AppIcon(app: CatalogApp, size: androidx.compose.ui.unit.Dp = RobStyleDimensions.catalogIconSize) {
+    val loader = LocalCatalogIcons.current
+    val bitmap by produceState<android.graphics.Bitmap?>(null, app.icon, loader) {
+        value = null
+        value = app.icon?.let { loader?.load(it) }
+    }
+    // The same bounds surround loading, official icons and fallback: no grid jumps.
+    Box(Modifier.size(size), contentAlignment = Alignment.Center) {
+        val image = bitmap
+        if (image != null) Image(image.asImageBitmap(), contentDescription = stringResource(R.string.app_icon, app.name),
+            modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Fit)
+        else Surface(modifier = Modifier.fillMaxSize(), shape = MaterialTheme.shapes.medium,
+            color = MaterialTheme.colorScheme.surfaceVariant) {
+            Icon(RobCatalogSymbol, contentDescription = stringResource(R.string.fallback_icon, app.name),
+                modifier = Modifier.padding(size / 4), tint = MaterialTheme.colorScheme.primary)
+        }
+    }
+}

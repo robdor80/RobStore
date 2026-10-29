@@ -1,13 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name" translatable="false">RobStore</string>
-    <string name="home_heading">Tu espacio de aplicaciones</string>
     <string name="catalog">Aplicaciones</string>
-    <string name="empty">Aún no hay aplicaciones disponibles</string>
+    <string name="empty">Aún no hay aplicaciones publicadas</string>
     <string name="loading">Cargando aplicaciones…</string>
     <string name="error">No se pudo cargar el catálogo</string>
     <string name="success">Catálogo preparado</string>
-    <string name="catalog_help">Se muestran las aplicaciones compatibles publicadas en GitHub. Un catálogo vacío es válido.</string>
+    <string name="catalog_help">Las aplicaciones aparecerán aquí cuando estén publicadas y disponibles.</string>
     <string name="error_help">Comprueba la conexión y vuelve a intentarlo cuando lo permita el intervalo de refresco.</string>
     <string name="retry">Reintentar</string>
     <string name="refresh">Refrescar catálogo</string>
@@ -16,7 +15,6 @@
     <string name="detail">Detalle de aplicación</string>
     <string name="description">Descripción</string>
     <string name="changelog">Novedades</string>
-    <string name="catalog_origin">GitHub público · robdor80 · topic robstore-app</string>
     <string name="version_value">Versión disponible: %1$s</string>
     <string name="available_later">Disponible · instalación en una fase posterior</string>
     <string name="refresh_policy">Caché válida durante 2 horas. Refresco manual cada 5 minutos como mínimo, sujeto a los límites de GitHub. Sin comprobaciones periódicas en segundo plano.</string>
@@ -39,13 +37,20 @@
     <string name="no_changelog">Sin notas de cambios.</string>
     <string name="apk_heading">Información del APK</string>
     <string name="apk_name_value">Adjunto: %1$s</string>
-    <plurals name="apk_size_value">
-        <item quantity="one">Tamaño: %1$d byte</item>
-        <item quantity="other">Tamaño: %1$d bytes</item>
-    </plurals>
-    <string name="apk_url_value">Descarga oficial: %1$s</string>
+    <string name="apk_url_value">URL del APK (metadato): %1$s</string>
     <string name="apk_digest_value">SHA-256 declarado por GitHub: %1$s</string>
     <string name="apk_unverified">APK sin verificación local de integridad ni firma. No se descarga ni instala en esta fase.</string>
     <string name="app_icon">Icono de %1$s</string>
     <string name="fallback_icon">Icono de sustitución de %1$s</string>
+    <string name="loading_help">Estamos comprobando las aplicaciones disponibles.</string>
+    <string name="next_refresh">Próxima comprobación permitida: %1$s</string>
+    <string name="repository_name">Repositorio oficial: %1$s</string>
+    <string name="apk_size_readable">Tamaño: %1$s</string>
+    <string name="diagnostics">Diagnósticos</string>
+    <string name="current_state">Estado actual</string>
+    <string name="catalog_ready">Catálogo guardado disponible</string>
+    <string name="origin_owner">Propietario: %1$s</string>
+    <string name="origin_topic">Topic: %1$s</string>
+    <string name="refresh_limited">Comprobación aplazada. Espera hasta la próxima hora permitida.</string>
+    <string name="no_diagnostics">Sin incidencias registradas.</string>
 </resources>

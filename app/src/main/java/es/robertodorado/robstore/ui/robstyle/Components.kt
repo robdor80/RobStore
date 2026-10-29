@@ -7,9 +7,18 @@ import androidx.compose.material3.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.graphics.vector.path
 import androidx.compose.ui.unit.dp
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.res.stringResource
 import es.robertodorado.robstore.R
 
@@ -52,7 +61,15 @@ fun RobStatus(state: RobVisualState, onRetry: () -> Unit = {}) {
             RobVisualState.Error -> R.string.error
             RobVisualState.Success -> R.string.success
         }), style = MaterialTheme.typography.titleLarge)
-        Text(stringResource(if (state == RobVisualState.Error) R.string.error_help else R.string.catalog_help),
+        if (state == RobVisualState.Empty) {
+            Icon(RobCatalogSymbol, contentDescription = null, tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(40.dp))
+        }
+        Text(stringResource(when (state) {
+            RobVisualState.Error -> R.string.error_help
+            RobVisualState.Loading -> R.string.loading_help
+            else -> R.string.catalog_help
+        }),
             color = MaterialTheme.colorScheme.onSurfaceVariant)
         if (state == RobVisualState.Error) {
             RobPrimaryButton(stringResource(R.string.retry), onClick = onRetry)
@@ -62,14 +79,36 @@ fun RobStatus(state: RobVisualState, onRetry: () -> Unit = {}) {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun RobTopBar(title: String, canGoBack: Boolean, onBack: () -> Unit, onSettings: (() -> Unit)?) {
-    TopAppBar(title = { Text(title) }, navigationIcon = {
+fun RobTopBar(title: String, canGoBack: Boolean, onBack: () -> Unit, onSettings: (() -> Unit)?,
+    onRefresh: (() -> Unit)? = null, refreshing: Boolean = false) {
+    TopAppBar(expandedHeight = 64.dp * LocalDensity.current.fontScale.coerceIn(1f, 2f),
+        title = { Text(title, maxLines = 2) }, navigationIcon = {
         if (canGoBack) IconButton(onClick = onBack) {
             Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.back))
         }
     }, actions = {
+        onRefresh?.let { callback ->
+            val label = stringResource(R.string.refresh)
+            val updating = stringResource(R.string.refreshing)
+            IconButton(onClick = callback, enabled = !refreshing, modifier = Modifier.semantics {
+                contentDescription = label
+                if (refreshing) stateDescription = updating
+            }) {
+                if (refreshing) CircularProgressIndicator(Modifier.size(24.dp), strokeWidth = 2.dp)
+                else Icon(Icons.Filled.Refresh, contentDescription = null)
+            }
+        }
         onSettings?.let { callback -> IconButton(onClick = callback) {
             Icon(Icons.Filled.Settings, contentDescription = stringResource(R.string.settings))
         } }
     }, colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background))
 }
+
+/** Neutral four-cell glyph, deliberately distinct from publisher artwork. */
+internal val RobCatalogSymbol = ImageVector.Builder("CatalogPlaceholder", 24.dp, 24.dp, 24f, 24f).apply {
+    path(fill = SolidColor(Color.White)) {
+        for (x in listOf(3f, 13f)) for (y in listOf(3f, 13f)) {
+            moveTo(x, y); lineTo(x + 8f, y); lineTo(x + 8f, y + 8f); lineTo(x, y + 8f); close()
+        }
+    }
+}.build()
