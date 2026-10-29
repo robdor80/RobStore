@@ -1,10 +1,13 @@
 # RobStore Android
 
-Tienda Android privada para distribuir aplicaciones propias. GitHub será el backend
-inicial de distribución; no se utilizarán Firebase ni un backend propio.
+Catálogo Android personal para distribuir aplicaciones propias y públicas en
+GitHub. No utiliza Firebase ni un backend propio.
 
-**Estado: RS-01 — RobStyle + navegación (preparada para auditoría).** Home, Detalle y Ajustes con Navigation Compose.
-No hay catálogo, red, descargas, instalaciones ni actualizaciones.
+**Estado: RS-02 — Catálogo automático de GitHub (entrega para auditoría).**
+Home descubre aplicaciones Android públicas de `robdor80` con topic `robstore-app`,
+manifiesto `robstore.json` v1 y una Release estable con el APK exacto declarado.
+Detalle muestra metadatos de esa etiqueta publicada. El catálogo se conserva sin
+conexión; un catálogo vacío real es válido. No hay descarga ni instalación de APK.
 
 ## Stack y requisitos
 
@@ -21,18 +24,28 @@ licencias del SDK e instala `platforms;android-36` y `build-tools;35.0.0`.
 ## Estructura
 
 ```text
-app/src/main/       Manifest, MainActivity, ui/RobStoreApp y ui/robstyle/
+app/src/main/       Manifest, MainActivity, catalog/, ui/ y ui/robstyle/
 app/src/debug/      Nombre DEV y recursos del icono DEV
-app/src/test/       Pruebas de identidad, manifiesto y arranque Compose
+app/src/test/       Catálogo, HTTP simulado, caché, iconos, identidad y Compose
 gradle/            Catálogo de versiones y Wrapper
 .github/workflows/  Validación Android
-docs/              Decisiones y evidencia de RS-00
+docs/              Contrato RS-02, decisiones y evidencia RS-00/RS-01
 ```
 
-Un único módulo `app`. La entrada Compose separa Activity, pantalla y tema.
-Cuando exista estado de pantalla, se incorporarán ViewModel, StateFlow y recolección
-con ciclo de vida; ahora no hay estado mutable que justifique esas piezas.
-Las rutas son `home`, `settings` y `app/{appId}`. No hay módulos `data`/`domain` ni servicios anticipados.
+Un único módulo `app`. OkHttp y kotlinx.serialization conectan la API pública sin
+credenciales. `CatalogRepository`, caché JSON privada con escritura atómica,
+`CatalogViewModel` y `StateFlow` separan IO de Compose. Se conserva Navigation
+Compose con `home`, `settings` y `app/{appId}`; las fichas usan el ID de GitHub,
+independiente de `packageName`.
+
+La caché vale 2 horas. Al iniciar se muestra primero el catálogo persistido y se
+refresca si corresponde. «Refrescar catálogo» comprueba GitHub con un intervalo
+mínimo de 5 minutos y respeta los límites primarios/secundarios. Los fallos de red
+o respuestas incompletas conservan el catálogo anterior. Sin trabajo periódico
+en segundo plano. Iconos PNG/WebP de la etiqueta, carga asíncrona, límites y caché.
+
+Consulta [docs/RS-02.md](docs/RS-02.md) para el contrato completo, endpoints,
+seguridad, límites de cuota, pruebas y un ejemplo de publicación reproducible.
 
 ## Variantes
 
@@ -62,14 +75,18 @@ Desde la raíz del repositorio:
 ```
 
 `test` ejecuta pruebas de ambas variantes mediante Robolectric sobre API 28.
-Comprueban identidad, nombre, sufijo DEV, recursos launcher, Activity, render,
-navegación y estados visuales. No requieren emulador y no sustituyen una prueba visual en
-dispositivo. La primera ejecución necesita acceso a Google Maven, Maven Central y
+Comprueban descubrimiento, manifiestos, Releases/APK, HTTP y cuota, caché/offline,
+refresco, iconos, identidad, launcher, Activity, navegación y estados visuales.
+Los tests usan transporte simulado y no consultan APIs reales. No requieren
+emulador y no sustituyen una prueba visual en dispositivo. La primera ejecución necesita acceso a Google Maven, Maven Central y
 las distribuciones Gradle.
 
 Los APK se generan en `app/build/outputs/apk/`; informes de tests en
 `app/build/reports/tests/` y de lint en `app/build/reports/`.
 La CI ejecuta tests, lint y compilaciones Debug/Release, sin publicación ni firma.
+Validación RS-02: **136 pruebas sin fallos ni omisiones**, `lint`, `assembleDebug`
+y `assembleRelease` correctos. Lint conserva siete avisos de versiones más recientes.
+Resultados y limitaciones en [docs/RS-02.md](docs/RS-02.md).
 
 ## RobStyle y fases siguientes
 
@@ -78,9 +95,14 @@ reutilizables sobre Material 3. El tema es oscuro por defecto. Previews incluyen
 pantallas compactas, grandes y texto ampliado. Consulta [docs/RS-01.md](docs/RS-01.md)
 para navegación, estados, validaciones y generación reproducible del icono oficial.
 
-Fases posteriores incorporarán catálogo e integración GitHub, consulta de apps
-instaladas, descargas, instalaciones y actualizaciones. Su orden y alcance se
-concretarán en cada fase. RS-00 no implementa estas funcionalidades.
+Para incorporar otra app: crea un repositorio público de `robdor80`, añade el topic
+`robstore-app`, versiona `robstore.json` e icono y publica una Release estable con
+el APK declarado. El manifiesto se lee desde la etiqueta de la Release. Cada
+actualización usa una nueva etiqueta/Release; no requiere recompilar RobStore.
+
+Fases posteriores incorporarán verificación real de integridad/firma, consulta de
+apps instaladas, descarga, instalación y comparación de versiones. RS-02 no las
+implementa ni afirma que los metadatos de GitHub sean verificación criptográfica.
 
 Consulta [docs/RS-00.md](docs/RS-00.md) para las decisiones, el entorno Cloud y las
 validaciones de esta entrega.

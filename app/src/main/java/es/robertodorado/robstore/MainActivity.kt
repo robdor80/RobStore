@@ -1,6 +1,12 @@
 package es.robertodorado.robstore
 
 import android.os.Bundle
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.viewmodel.compose.viewModel
+import es.robertodorado.robstore.catalog.CatalogViewModel
+import es.robertodorado.robstore.ui.LocalCatalogIcons
 import androidx.activity.SystemBarStyle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -17,7 +23,11 @@ class MainActivity : ComponentActivity() {
         )
         setContent {
             RobStyleTheme {
-                RobStoreApp()
+                val model: CatalogViewModel = viewModel()
+                val state by model.state.collectAsStateWithLifecycle()
+                CompositionLocalProvider(LocalCatalogIcons provides model.icons) {
+                    RobStoreApp(state = state, onRefresh = model::refresh)
+                }
             }
         }
     }

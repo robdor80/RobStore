@@ -15,6 +15,8 @@ import org.robolectric.annotation.Config
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [28])
 class AppIdentityTest {
+    @org.junit.Before fun fakeNetwork() { es.robertodorado.robstore.catalog.disableActivityNetwork() }
+    @org.junit.After fun restoreNetwork() { es.robertodorado.robstore.catalog.CatalogRuntime.transportFactory = { es.robertodorado.robstore.catalog.OkHttpTransport() } }
     private val application get() = RuntimeEnvironment.getApplication()
     private val isDebug get() = BuildConfig.BUILD_TYPE == "debug"
 
