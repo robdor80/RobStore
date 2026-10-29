@@ -47,6 +47,13 @@ class AppIdentityTest {
     }
 
     @Test
+    fun launcherResourcesAreResolvable() {
+        assertEquals(R.mipmap.ic_launcher, application.applicationInfo.icon)
+        assertNotNull(application.getDrawable(R.mipmap.ic_launcher))
+        assertNotNull(application.getDrawable(R.mipmap.ic_launcher_round))
+    }
+
+    @Test
     fun manifestExposesTheEntryActivity() {
         val launchIntent = application.packageManager
             .getLaunchIntentForPackage(application.packageName)
