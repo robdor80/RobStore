@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<lint>
+    <!-- The owner's square PNG must remain intact. Round legacy resources fit
+         inside a circle with transparent padding; do not cut or repaint the art.
+         API 26+ uses the adaptive XML and the launcher's own round mask. -->
+    <issue id="IconLauncherShape">
+        <ignore path="src/main/res/mipmap-*/ic_launcher_round.png" />
+        <ignore path="src/debug/res/mipmap-*/ic_launcher_round.png" />
+    </issue>
+    <!-- The API qualifier keeps adaptive XML selected over density-specific
+         legacy PNGs. LauncherIconTest verifies this on API 28. -->
+    <issue id="ObsoleteSdkInt">
+        <ignore path="src/main/res/mipmap-anydpi-v26" />
+    </issue>
+</lint>

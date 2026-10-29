@@ -43,7 +43,17 @@ class AppIdentityTest {
             val content = activity.findViewById<ViewGroup>(android.R.id.content)
 
             assertTrue(content.getChildAt(0) is ComposeView)
+            val bars = androidx.core.view.WindowInsetsControllerCompat(activity.window, activity.window.decorView)
+            org.junit.Assert.assertFalse(bars.isAppearanceLightStatusBars)
+            org.junit.Assert.assertFalse(bars.isAppearanceLightNavigationBars)
         }
+    }
+
+    @Test
+    fun launcherResourcesAreResolvable() {
+        assertEquals(R.mipmap.ic_launcher, application.applicationInfo.icon)
+        assertNotNull(application.getDrawable(R.mipmap.ic_launcher))
+        assertNotNull(application.getDrawable(R.mipmap.ic_launcher_round))
     }
 
     @Test
