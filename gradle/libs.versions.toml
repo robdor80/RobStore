@@ -7,6 +7,11 @@ junit = "4.13.2"
 robolectric = "4.16.1"
 
 [libraries]
+androidx-compose-icons = { module = "androidx.compose.material:material-icons-core" }
+androidx-compose-preview = { module = "androidx.compose.ui:ui-tooling-preview" }
+androidx-compose-tooling = { module = "androidx.compose.ui:ui-tooling" }
+androidx-navigation-compose = { module = "androidx.navigation:navigation-compose", version = "2.9.6" }
+androidx-compose-ui-test = { module = "androidx.compose.ui:ui-test-junit4" }
 androidx-activity-compose = { module = "androidx.activity:activity-compose", version.ref = "activity-compose" }
 androidx-compose-bom = { module = "androidx.compose:compose-bom", version.ref = "compose-bom" }
 androidx-compose-ui = { module = "androidx.compose.ui:ui" }

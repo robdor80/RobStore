@@ -1,5 +1,33 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name" translatable="false">RobStore</string>
-    <string name="foundation_phase" translatable="false">RS-00 · Fundaciones</string>
+    <string name="home_heading">Tu espacio de aplicaciones</string>
+    <string name="home_intro">Tus aplicaciones, en un único lugar.</string>
+    <string name="catalog">Aplicaciones</string>
+    <string name="empty">Aún no hay aplicaciones disponibles</string>
+    <string name="loading">Cargando aplicaciones…</string>
+    <string name="error">No se pudo cargar el catálogo</string>
+    <string name="success">Catálogo preparado</string>
+    <string name="catalog_help">El catálogo estará disponible en una próxima versión.</string>
+    <string name="error_help">Vuelve a intentarlo cuando el catálogo esté disponible.</string>
+    <string name="retry">Reintentar</string>
+    <string name="refresh">Refrescar catálogo</string>
+    <string name="refresh_help">El refresco se habilitará al conectar el catálogo.</string>
+    <string name="settings">Ajustes</string>
+    <string name="back">Volver</string>
+    <string name="settings_intro">Preferencias de RobStore. Las siguientes opciones aún no están disponibles.</string>
+    <string name="automatic">Comprobación automática</string>
+    <string name="channel">Canal de actualización</string>
+    <string name="downloads">Descargas</string>
+    <string name="notifications">Notificaciones</string>
+    <string name="future_option">Próximamente · Sin configurar</string>
+    <string name="detail">Detalle de aplicación</string>
+    <string name="icon_placeholder">Icono pendiente</string>
+    <string name="name_placeholder">Aplicación sin datos</string>
+    <string name="installed_version">Versión instalada: sin datos</string>
+    <string name="available_version">Versión disponible: sin datos</string>
+    <string name="unavailable_action">Acción no disponible</string>
+    <string name="description">Descripción</string>
+    <string name="changelog">Novedades</string>
+    <string name="pending_metadata">Información pendiente del catálogo.</string>
 </resources>
