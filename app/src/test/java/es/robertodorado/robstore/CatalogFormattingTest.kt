@@ -1,6 +1,7 @@
 package es.robertodorado.robstore
 
 import es.robertodorado.robstore.ui.*
+import java.time.Clock
 import java.time.Instant
 import java.time.ZoneId
 import java.util.Locale
@@ -33,6 +34,29 @@ class CatalogFormattingTest {
         assertNull(displayDate(0)); assertNull(displayDate(-1)); assertNull(displayReleaseDate("invalid"))
         assertNull(displayReleaseDate("1970-01-01T00:00:00Z"))
     }
+    @Test fun refreshDeadlineUsesDeterministicClockAcrossTimeZones() {
+        val now = Instant.parse("2026-03-29T00:59:59Z")
+        for (zone in listOf("UTC", "Europe/Madrid", "America/Los_Angeles", "Asia/Tokyo")) {
+            val clock = Clock.fixed(now, ZoneId.of(zone))
+            assertEquals(RefreshAvailability.Blocked, refreshAvailability(now.toEpochMilli() + 1000, clock))
+            assertEquals(RefreshAvailability.Allowed, refreshAvailability(now.toEpochMilli(), clock))
+            assertEquals(RefreshAvailability.Allowed, refreshAvailability(now.toEpochMilli() - 1, clock))
+            assertEquals(RefreshAvailability.Unknown, refreshAvailability(0, clock))
+            assertEquals(RefreshAvailability.Unknown, refreshAvailability(-1, clock))
+        }
+    }
+
+    @Test fun blockedDeadlineRetainsLocalizedFormattingAcrossDstAndDateRollover() {
+        val deadline = Instant.parse("2026-03-29T01:00:00Z").toEpochMilli()
+        val clock = Clock.fixed(Instant.ofEpochMilli(deadline - 1), ZoneId.of("UTC"))
+        assertEquals(RefreshAvailability.Blocked, refreshAvailability(deadline, clock))
+        assertTrue(displayDate(deadline, ZoneId.of("Europe/Madrid"), spanish)!!.endsWith("3:00"))
+        val pacific = displayDate(deadline, ZoneId.of("America/Los_Angeles"), Locale.US)!!
+        assertTrue(pacific.contains("Mar 28, 2026"))
+        assertTrue(pacific.contains("6:00 PM"))
+        assertEquals(RefreshAvailability.Allowed, refreshAvailability(deadline, Clock.offset(clock, java.time.Duration.ofMillis(1))))
+    }
+
     @Test fun apkSizesAreReadableWithoutIntOverflow() {
         assertEquals("1.2 KiB", displayApkSize(1234, Locale.US))
         assertEquals("4,3 MiB", displayApkSize(4_500_000, spanish))

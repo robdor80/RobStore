@@ -7,6 +7,11 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
+import java.time.Clock
+import java.time.Instant
+import java.time.ZoneId
+import java.util.Locale
+import java.util.TimeZone
 import androidx.compose.ui.Modifier
 import androidx.compose.foundation.layout.requiredWidth
 import androidx.compose.foundation.layout.Box
@@ -28,28 +33,38 @@ import org.robolectric.annotation.Config
 class RobUiTest {
     @get:Rule val compose = createEmptyComposeRule()
 
-    @org.junit.Before fun fakeNetwork() { disableActivityNetwork() }
+    @org.junit.Before fun fakeNetwork() {
+        disableActivityNetwork()
+        Locale.setDefault(Locale.US)
+        TimeZone.setDefault(TimeZone.getTimeZone("UTC"))
+    }
+
+    private var testClock: Clock = Clock.fixed(Instant.ofEpochMilli(TEST_NOW), ZoneId.of("UTC"))
+    private val originalLocale = Locale.getDefault()
+    private val originalZone = TimeZone.getDefault()
 
     private lateinit var controller: ActivityController<MainActivity>
 
     private fun render(content: @Composable () -> Unit) {
         controller = Robolectric.buildActivity(MainActivity::class.java).setup().visible()
-        controller.get().setContent(content = content)
+        controller.get().setContent { CompositionLocalProvider(LocalCatalogClock provides testClock) { content() } }
     }
 
     @After fun tearDown() {
         if (::controller.isInitialized) controller.close()
+        Locale.setDefault(originalLocale)
+        TimeZone.setDefault(originalZone)
         CatalogRuntime.transportFactory = ::OkHttpTransport
     }
 
     @Test fun settingsNavigationAndReturn() {
         render { RobStyleTheme { RobStoreApp() } }
-        compose.onNodeWithText("Aún no hay aplicaciones publicadas").assertIsDisplayed()
+        compose.onNodeWithText("Pendiente de primera sincronización").assertIsDisplayed()
         compose.onNodeWithContentDescription("Refrescar catálogo").assertIsEnabled()
         compose.onNodeWithContentDescription("Ajustes").performClick()
         compose.onNodeWithText("Origen del catálogo").assertIsDisplayed()
         compose.onNodeWithContentDescription("Volver").performClick()
-        compose.onNodeWithText("Aún no hay aplicaciones publicadas").assertIsDisplayed()
+        compose.onNodeWithText("Pendiente de primera sincronización").assertIsDisplayed()
     }
 
     @Test fun detailRouteAndBack() {
@@ -64,7 +79,7 @@ class RobUiTest {
             org.junit.Assert.assertEquals("internal/id", nav.currentBackStackEntry?.arguments?.getString("appId"))
         }
         compose.onNodeWithContentDescription("Volver").performClick()
-        compose.onNodeWithText("Aún no hay aplicaciones publicadas").assertIsDisplayed()
+        compose.onNodeWithText("Pendiente de primera sincronización").assertIsDisplayed()
     }
 
     @Test fun homeCardOpensRealMetadataAndBack() {
@@ -105,8 +120,7 @@ class RobUiTest {
     @Test fun cachedErrorAndEmptyAreDistinguished() {
         render { RobStyleTheme { HomeScreen(onSettings = {}, state = CatalogState(snapshot = fixtureSnapshot(), loading = false,
             stale = true, failed = true, message = "Sin conexión")) } }
-        compose.onNodeWithText("Caché desactualizada. Los datos pueden haber cambiado.").assertExists()
-        compose.onNodeWithText("No se pudo completar la comprobación. Se conserva el catálogo anterior.").assertExists()
+        compose.onNodeWithText("Comprobación fallida · caché desactualizada").assertIsDisplayed()
         compose.onNode(hasScrollToIndexAction()).performScrollToNode(hasText("Aplicación de prueba"))
         compose.onNodeWithText("Aplicación de prueba").assertExists()
         compose.onNodeWithText("Aún no hay aplicaciones publicadas").assertDoesNotExist()
@@ -233,7 +247,7 @@ class RobUiTest {
         val state = CatalogState(loading = false, failed = true, snapshot = fixtureSnapshot().copy(apps = emptyList()))
         render { RobStyleTheme { HomeScreen(onSettings = {}, state = state) } }
         compose.onNodeWithText("Aún no hay aplicaciones publicadas").assertExists()
-        compose.onNodeWithText("No se pudo completar la comprobación. Se conserva el catálogo anterior.").assertExists()
+        compose.onNodeWithText("Comprobación fallida · catálogo guardado disponible").assertExists()
         compose.onNodeWithText("Reintentar").assertDoesNotExist()
     }
 
@@ -244,6 +258,138 @@ class RobUiTest {
         compose.onNodeWithText("Próxima comprobación permitida: " + displayDate(next)).assertExists()
         compose.onNodeWithText("Comprobación aplazada. Espera hasta la próxima hora permitida.").assertExists()
         compose.onNodeWithText("Catálogo preparado").assertDoesNotExist()
+    }
+
+    @Test
+    @Config(qualifiers = "w360dp-h800dp")
+    @org.robolectric.annotation.GraphicsMode(org.robolectric.annotation.GraphicsMode.Mode.NATIVE)
+    fun noSnapshotIsPendingUntilARealEmptySnapshotArrives() {
+        var state by mutableStateOf(CatalogState(loading = false))
+        render { RobStyleTheme { HomeScreen(onSettings = {}, state = state) } }
+        compose.onNodeWithText("Pendiente de primera sincronización").assertIsDisplayed()
+        compose.onNodeWithText("Todavía no hay una sincronización válida.").assertIsDisplayed()
+        compose.onNodeWithText("Aún no hay aplicaciones publicadas").assertDoesNotExist()
+        compose.onNodeWithText("Catálogo preparado").assertDoesNotExist()
+        saveNativeEvidence("home-pending-sync")
+        // Snapshot produced by the real RS-02 discovery with an empty GitHub response.
+        val empty = CatalogDiscovery(GitHubClient(HttpTransport { HttpResult(200, "[]".toByteArray()) }, MemoryCache()) { TEST_NOW }) { TEST_NOW }.fetch()
+        compose.runOnIdle { state = state.copy(snapshot = empty) }
+        compose.onNodeWithText("Aún no hay aplicaciones publicadas").assertIsDisplayed()
+        compose.onNodeWithText("Pendiente de primera sincronización").assertDoesNotExist()
+    }
+
+    private fun checkNoticesBeforeThirtyApps(fontScale: Float) {
+        var state by mutableStateOf(gridFixture().copy(stale = true))
+        render { RobStyleTheme {
+            val density = LocalDensity.current
+            CompositionLocalProvider(LocalDensity provides Density(density.density, fontScale)) {
+                HomeScreen(onSettings = {}, state = state)
+            }
+        } }
+        fun checkVisible(text: String) {
+            compose.onNodeWithText(text).assertIsDisplayed()
+            compose.onNodeWithTag("app_1").assertIsDisplayed()
+            compose.onNodeWithTag("app_30").assertDoesNotExist()
+            val notice = compose.onNodeWithTag("sync_notice").fetchSemanticsNode()
+            assertEquals(androidx.compose.ui.semantics.LiveRegionMode.Polite,
+                notice.config[androidx.compose.ui.semantics.SemanticsProperties.LiveRegion])
+            assertTrue(notice.boundsInRoot.bottom <= compose.onNodeWithTag("app_1").fetchSemanticsNode().boundsInRoot.top)
+        }
+        checkVisible("Caché desactualizada. Los datos pueden haber cambiado.")
+        saveNativeEvidence("home-30-stale-$fontScale")
+        compose.runOnIdle { state = state.copy(failed = true, message = "Diagnóstico técnico sin conexión") }
+        checkVisible("Comprobación fallida · caché desactualizada")
+        compose.onNodeWithText("Caché desactualizada. Los datos pueden haber cambiado.").assertDoesNotExist()
+        compose.onNodeWithText("Diagnóstico técnico sin conexión").assertDoesNotExist()
+        saveNativeEvidence("home-30-error-$fontScale")
+        compose.runOnIdle { state = state.copy(stale = false, failed = false, nextRefreshAt = TEST_NOW + 300_000) }
+        checkVisible("Comprobación aplazada. Espera hasta la próxima hora permitida.")
+        compose.onNodeWithText("Próxima comprobación permitida: " + displayDate(state.nextRefreshAt)).assertIsDisplayed()
+        saveNativeEvidence("home-30-limited-$fontScale")
+    }
+
+    @Test @Config(qualifiers = "w360dp-h800dp")
+    @org.robolectric.annotation.GraphicsMode(org.robolectric.annotation.GraphicsMode.Mode.NATIVE)
+    fun thirtyAppsKeepStaleErrorAndLimitedNoticesVisible() = checkNoticesBeforeThirtyApps(1f)
+
+    @Test @Config(qualifiers = "w320dp-h1000dp")
+    @org.robolectric.annotation.GraphicsMode(org.robolectric.annotation.GraphicsMode.Mode.NATIVE)
+    fun thirtyAppsKeepNoticesVisibleWithEnlargedFont() = checkNoticesBeforeThirtyApps(2f)
+
+    @Test fun expiredAndMissingRefreshTimesDoNotAnnounceFutureCheck() {
+        var next by mutableLongStateOf(TEST_NOW - 1)
+        render { RobStyleTheme { HomeScreen(onSettings = {}, state = gridFixture().copy(
+            message = "Aún no se permite otra comprobación.", nextRefreshAt = next)) } }
+        compose.onNodeWithText("Ya puedes comprobar el catálogo.").assertIsDisplayed()
+        compose.onNodeWithText("Próxima comprobación permitida:", substring = true).assertDoesNotExist()
+        compose.onNodeWithText("Comprobación aplazada", substring = true).assertDoesNotExist()
+        compose.runOnIdle { next = TEST_NOW }
+        compose.onNodeWithText("Ya puedes comprobar el catálogo.").assertIsDisplayed()
+        for (invalid in listOf(0L, -1L)) {
+            compose.runOnIdle { next = invalid }
+            compose.onNodeWithText("Hora de próxima comprobación no disponible.").assertIsDisplayed()
+            compose.onNodeWithText("Ya puedes comprobar el catálogo.").assertDoesNotExist()
+            compose.onNodeWithText("Próxima comprobación permitida:", substring = true).assertDoesNotExist()
+        }
+    }
+
+    @Test fun visibleDeadlineExpiresWithoutPeriodicWorkOrRefresh() {
+        var now = TEST_NOW
+        testClock = object : Clock() {
+            override fun getZone(): ZoneId = ZoneId.of("UTC")
+            override fun withZone(zone: ZoneId): Clock = Clock.fixed(instant(), zone)
+            override fun instant(): Instant = Instant.ofEpochMilli(now)
+        }
+        var calls = 0
+        render { RobStyleTheme { HomeScreen(onSettings = {}, state = gridFixture().copy(
+            message = "Intervalo mínimo", nextRefreshAt = TEST_NOW + 1000), onRefresh = { calls++ }) } }
+        compose.onNodeWithText("Próxima comprobación permitida:", substring = true).assertIsDisplayed()
+        now += 1000
+        compose.mainClock.advanceTimeBy(1100)
+        org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idleFor(java.time.Duration.ofMillis(1100))
+        compose.onNodeWithText("Ya puedes comprobar el catálogo.").assertIsDisplayed()
+        compose.onNodeWithText("Próxima comprobación permitida:", substring = true).assertDoesNotExist()
+        assertEquals(0, calls)
+    }
+
+    @Test fun futureGateWithoutDiagnosticIsVisibleBeforeApps() {
+        render { RobStyleTheme { HomeScreen(onSettings = {}, state = gridFixture().copy(nextRefreshAt = TEST_NOW + 300_000)) } }
+        compose.onNodeWithText("Comprobación aplazada. Espera hasta la próxima hora permitida.").assertIsDisplayed()
+        compose.onNodeWithTag("app_1").assertIsDisplayed()
+        assertTrue(compose.onNodeWithTag("sync_notice").fetchSemanticsNode().boundsInRoot.bottom <=
+            compose.onNodeWithTag("app_1").fetchSemanticsNode().boundsInRoot.top)
+    }
+
+    @Test fun resumeRechecksExpiredGateWithoutNetwork() {
+        var now = TEST_NOW
+        testClock = object : Clock() {
+            override fun getZone(): ZoneId = ZoneId.of("UTC")
+            override fun withZone(zone: ZoneId): Clock = Clock.fixed(instant(), zone)
+            override fun instant(): Instant = Instant.ofEpochMilli(now)
+        }
+        var calls = 0
+        render { RobStyleTheme { HomeScreen(onSettings = {}, state = gridFixture().copy(
+            message = "Intervalo mínimo", nextRefreshAt = TEST_NOW + 300_000), onRefresh = { calls++ }) } }
+        compose.onNodeWithText("Próxima comprobación permitida:", substring = true).assertIsDisplayed()
+        compose.runOnIdle { controller.pause(); now += 300_001; controller.resume() }
+        compose.onNodeWithText("Ya puedes comprobar el catálogo.").assertIsDisplayed()
+        compose.onNodeWithText("Próxima comprobación permitida:", substring = true).assertDoesNotExist()
+        assertEquals(0, calls)
+    }
+
+    @Test fun settingsKeepsTechnicalWarningsAndDistinguishesRefreshTiming() {
+        var next by mutableLongStateOf(TEST_NOW + 300_000)
+        render { RobStyleTheme { SettingsScreen(onBack = {}, state = gridFixture().copy(stale = true,
+            failed = true, message = "Diagnóstico técnico sin conexión", nextRefreshAt = next)) } }
+        compose.onNodeWithText("Caché desactualizada. Los datos pueden haber cambiado.").assertExists()
+        compose.onNodeWithText("No se pudo completar la comprobación. Se conserva el catálogo anterior.").assertExists()
+        compose.onNodeWithText("Diagnóstico técnico sin conexión").performScrollTo().assertExists()
+        compose.onNodeWithText("Próxima comprobación permitida:", substring = true).assertExists()
+        compose.runOnIdle { next = TEST_NOW }
+        compose.onNodeWithText("Ya puedes comprobar el catálogo.").assertExists()
+        compose.onNodeWithText("Próxima comprobación permitida:", substring = true).assertDoesNotExist()
+        compose.runOnIdle { next = 0 }
+        compose.onNodeWithText("Hora de próxima comprobación no disponible.").assertExists()
     }
 
     @Test fun removedAppAndAndroidBackReturnToHome() {
@@ -332,7 +478,7 @@ class RobUiTest {
         compose.onNodeWithText("Aún no hay aplicaciones publicadas").assertIsDisplayed()
         saveNativeEvidence("home-empty")
         compose.runOnIdle { state = gridFixture(4).copy(stale = true, failed = true, message = "Sin conexión") }
-        compose.onNodeWithTag("catalog_grid").performScrollToNode(hasText("No se pudo completar la comprobación. Se conserva el catálogo anterior."))
+        compose.onNodeWithText("Comprobación fallida · caché desactualizada").assertIsDisplayed()
         saveNativeEvidence("home-cached-error")
     }
 

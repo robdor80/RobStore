@@ -3,6 +3,11 @@
     <string name="app_name" translatable="false">RobStore</string>
     <string name="catalog">Aplicaciones</string>
     <string name="empty">Aún no hay aplicaciones publicadas</string>
+    <string name="sync_pending">Pendiente de primera sincronización</string>
+    <string name="sync_failed_stale">Comprobación fallida · caché desactualizada</string>
+    <string name="sync_failed_cached">Comprobación fallida · catálogo guardado disponible</string>
+    <string name="refresh_allowed">Ya puedes comprobar el catálogo.</string>
+    <string name="refresh_time_unknown">Hora de próxima comprobación no disponible.</string>
     <string name="loading">Cargando aplicaciones…</string>
     <string name="error">No se pudo cargar el catálogo</string>
     <string name="success">Catálogo preparado</string>

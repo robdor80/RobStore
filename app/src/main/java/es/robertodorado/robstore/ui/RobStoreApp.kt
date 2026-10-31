@@ -22,9 +22,18 @@ import androidx.navigation.NavHostController
 import androidx.navigation.NavType
 import androidx.navigation.compose.*
 import androidx.navigation.navArgument
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
+import java.time.Clock
+import kotlinx.coroutines.delay
 import es.robertodorado.robstore.R
 import es.robertodorado.robstore.catalog.*
 import es.robertodorado.robstore.ui.robstyle.*
+
+internal val LocalCatalogClock = staticCompositionLocalOf { Clock.systemDefaultZone() }
 
 internal val LocalCatalogIcons = staticCompositionLocalOf<CatalogIconLoader?> { null }
 
@@ -83,6 +92,7 @@ fun HomeScreen(onSettings: () -> Unit, state: CatalogState = CatalogState(loadin
 
 @Composable
 private fun RobCatalogGrid(state: CatalogState, onRefresh: () -> Unit, onOpenApp: (Long) -> Unit) {
+    val timing = refreshTiming(state.nextRefreshAt)
     val fontScale = LocalDensity.current.fontScale.coerceAtLeast(1f)
     LazyVerticalGrid(
         columns = GridCells.Adaptive(RobStyleDimensions.appTileMinWidth * fontScale),
@@ -93,6 +103,9 @@ private fun RobCatalogGrid(state: CatalogState, onRefresh: () -> Unit, onOpenApp
     ) {
         item(key = "heading", span = { GridItemSpan(maxLineSpan) }) {
             Text(stringResource(R.string.catalog), style = MaterialTheme.typography.titleLarge)
+        }
+        if ((state.snapshot != null && (state.stale || state.failed)) || timing == RefreshAvailability.Blocked || (state.message != null && !state.failed)) {
+            item(key = "sync", span = { GridItemSpan(maxLineSpan) }) { RobSyncIndicator(state, compact = true, timing = timing) }
         }
         // A snapshot, including a valid empty one, takes priority over transient loading/errors.
         if (state.snapshot != null) {
@@ -107,11 +120,16 @@ private fun RobCatalogGrid(state: CatalogState, onRefresh: () -> Unit, onOpenApp
                 when {
                     state.loading || state.refreshing -> RobStatus(RobVisualState.Loading)
                     state.failed -> RobStatus(RobVisualState.Error, onRetry = onRefresh)
-                    else -> RobStatus(RobVisualState.Empty)
+                    else -> RobStatus(RobVisualState.Pending)
                 }
             }
         }
-        item(key = "sync", span = { GridItemSpan(maxLineSpan) }) { RobSyncIndicator(state) }
+        state.snapshot?.let { displayDate(it.syncedAt) }?.let { date ->
+            item(key = "last_sync", span = { GridItemSpan(maxLineSpan) }) {
+                Text(stringResource(R.string.last_sync, date), style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
     }
 }
 
@@ -134,14 +152,56 @@ internal fun RobAppTile(app: CatalogApp, onClick: () -> Unit) {
     }
 }
 
+/** Re-evaluate on resume and once at expiry; no polling or background refresh. */
 @Composable
-internal fun RobSyncIndicator(state: CatalogState, technical: Boolean = false) {
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        if (state.refreshing || state.loading) {
-            if (state.snapshot != null) {
-                LinearProgressIndicator(Modifier.fillMaxWidth())
-                Text(stringResource(R.string.refreshing), style = MaterialTheme.typography.bodySmall)
+private fun refreshTiming(nextRefreshAt: Long): RefreshAvailability {
+    val clock = LocalCatalogClock.current
+    var observedAt by remember(nextRefreshAt, clock) { mutableLongStateOf(clock.millis()) }
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { observedAt = clock.millis() }
+    LaunchedEffect(nextRefreshAt, clock, observedAt) {
+        val remaining = nextRefreshAt - clock.millis()
+        if (nextRefreshAt > 0 && remaining > 0) {
+            delay(remaining)
+            observedAt = clock.millis()
+        }
+    }
+    return refreshAvailability(nextRefreshAt, clock)
+}
+
+@Composable
+internal fun RobSyncIndicator(state: CatalogState, technical: Boolean = false, compact: Boolean = false, timing: RefreshAvailability = refreshTiming(state.nextRefreshAt)) {
+    val blocked = timing == RefreshAvailability.Blocked
+    if (compact) {
+        // Initial failures already have an error card. Cached failures/staleness need a
+        // visible notice ahead of the grid, even if there are hundreds of applications.
+        val summary = when {
+            state.failed && state.snapshot != null -> if (state.stale) R.string.sync_failed_stale else R.string.sync_failed_cached
+            state.stale && state.snapshot != null -> R.string.stale_cache
+            blocked -> R.string.refresh_limited
+            state.message != null && !state.failed -> if (timing == RefreshAvailability.Allowed) R.string.refresh_allowed else R.string.refresh_time_unknown
+            else -> null
+        }
+        val showDeadline = blocked
+        if (summary != null || showDeadline) {
+            Surface(modifier = Modifier.fillMaxWidth().testTag("sync_notice").semantics(mergeDescendants = true) {
+                liveRegion = LiveRegionMode.Polite
+            }, shape = MaterialTheme.shapes.small, color = MaterialTheme.colorScheme.surface,
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)) {
+                Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    summary?.let { Text(stringResource(it), style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                    if (showDeadline) displayDate(state.nextRefreshAt)?.let {
+                        Text(stringResource(R.string.next_refresh, it), style = MaterialTheme.typography.bodySmall)
+                    }
+                }
             }
+        }
+        return
+    }
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        if ((state.refreshing || state.loading) && state.snapshot != null) {
+            LinearProgressIndicator(Modifier.fillMaxWidth())
+            Text(stringResource(R.string.refreshing), style = MaterialTheme.typography.bodySmall)
         }
         state.snapshot?.let { snapshot ->
             displayDate(snapshot.syncedAt)?.let {
@@ -162,13 +222,14 @@ internal fun RobSyncIndicator(state: CatalogState, technical: Boolean = false) {
                 else -> R.string.no_sync
             }))
         }
-        if (technical || state.message != null) {
-            displayDate(state.nextRefreshAt)?.let {
+        if (technical || state.message != null) when (timing) {
+            RefreshAvailability.Blocked -> displayDate(state.nextRefreshAt)?.let {
                 Text(stringResource(R.string.next_refresh, it), style = MaterialTheme.typography.bodySmall)
             }
+            RefreshAvailability.Allowed -> Text(stringResource(R.string.refresh_allowed), style = MaterialTheme.typography.bodySmall)
+            RefreshAvailability.Unknown -> Text(stringResource(R.string.refresh_time_unknown), style = MaterialTheme.typography.bodySmall)
         }
-        // Home uses a short explanation; raw diagnostics remain readable in Settings.
-        if (!technical && state.message != null && !state.failed) {
+        if (!technical && state.message != null && !state.failed && blocked) {
             Text(stringResource(R.string.refresh_limited), style = MaterialTheme.typography.bodySmall)
         }
     }
@@ -186,7 +247,7 @@ fun SettingsScreen(onBack: () -> Unit, state: CatalogState = CatalogState(loadin
         RobCard {
             RobSectionHeader(stringResource(R.string.sync_heading))
             RobSyncIndicator(state, technical = true)
-            if (state.snapshot == null) Text(stringResource(R.string.no_sync))
+            if (state.snapshot == null && (state.loading || state.refreshing || state.failed)) Text(stringResource(R.string.no_sync))
             Text(stringResource(R.string.refresh_policy))
             Text(stringResource(R.string.offline_policy))
         }

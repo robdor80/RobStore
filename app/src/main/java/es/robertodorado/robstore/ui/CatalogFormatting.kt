@@ -1,11 +1,21 @@
 package es.robertodorado.robstore.ui
 
 import java.time.Instant
+import java.time.Clock
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.time.format.DateTimeParseException
 import java.time.format.FormatStyle
 import java.util.Locale
+
+internal enum class RefreshAvailability { Unknown, Blocked, Allowed }
+
+/** Compare epoch values, independently of the locale/zone used to display them. */
+internal fun refreshAvailability(nextRefreshAt: Long, clock: Clock): RefreshAvailability = when {
+    nextRefreshAt <= 0 -> RefreshAvailability.Unknown
+    nextRefreshAt > clock.millis() -> RefreshAvailability.Blocked
+    else -> RefreshAvailability.Allowed
+}
 
 /** Structured timestamps only; zero/invalid metadata never becomes a displayed date. */
 internal fun displayDate(time: Long, zone: ZoneId = ZoneId.systemDefault(), locale: Locale = Locale.getDefault()): String? {

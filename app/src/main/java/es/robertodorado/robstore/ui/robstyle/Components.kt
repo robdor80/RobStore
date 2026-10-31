@@ -47,7 +47,7 @@ fun RobSectionHeader(title: String) {
     Text(title, style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.primary)
 }
 
-enum class RobVisualState { Loading, Empty, Error, Success }
+enum class RobVisualState { Pending, Loading, Empty, Error, Success }
 
 @Composable
 fun RobStatus(state: RobVisualState, onRetry: () -> Unit = {}) {
@@ -56,6 +56,7 @@ fun RobStatus(state: RobVisualState, onRetry: () -> Unit = {}) {
             CircularProgressIndicator()
         }
         Text(stringResource(when (state) {
+            RobVisualState.Pending -> R.string.sync_pending
             RobVisualState.Loading -> R.string.loading
             RobVisualState.Empty -> R.string.empty
             RobVisualState.Error -> R.string.error
@@ -66,6 +67,7 @@ fun RobStatus(state: RobVisualState, onRetry: () -> Unit = {}) {
                 modifier = Modifier.size(40.dp))
         }
         Text(stringResource(when (state) {
+            RobVisualState.Pending -> R.string.no_sync
             RobVisualState.Error -> R.string.error_help
             RobVisualState.Loading -> R.string.loading_help
             else -> R.string.catalog_help
