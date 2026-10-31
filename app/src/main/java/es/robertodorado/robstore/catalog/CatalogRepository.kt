@@ -54,7 +54,7 @@ internal class CatalogRepository(
                 val old = mutableState.value.snapshot
                 if (manual || old == null || expired(old)) mutableState.value = mutableState.value.copy(loading = false,
                     stale = old != null && expired(old), failed = old == null || mutableState.value.failed,
-                    message = "Próxima comprobación permitida: ${java.time.Instant.ofEpochMilli(next)}. Intervalo mínimo: 5 minutos; se respetan los límites de GitHub.",
+                    message = "Aún no se permite otra comprobación. Intervalo mínimo: 5 minutos; se respetan los límites de GitHub.",
                     nextRefreshAt = next)
                 return@withContext
             }

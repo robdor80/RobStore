@@ -33,3 +33,23 @@ jobs:
         run: chmod +x gradlew
       - name: Test, lint and compile
         run: ./gradlew test lint assembleDebug assembleRelease --no-daemon
+      - name: Check whitespace
+        run: git diff --check
+      - name: Summarize audit evidence
+        if: always()
+        run: |
+          python3 tools/summarize_rs03.py
+          cat app/build/rs03-summary/resultados.md >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload test, lint and Robolectric evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rs03-validation-${{ github.sha }}
+          retention-days: 30
+          if-no-files-found: error
+          path: |
+            app/build/test-results/test*UnitTest/TEST-*.xml
+            app/build/reports/tests/
+            app/build/reports/lint-results*
+            app/build/rs03-evidence/
+            app/build/rs03-summary/
