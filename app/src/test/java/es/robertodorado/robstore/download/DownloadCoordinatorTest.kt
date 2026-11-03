@@ -12,12 +12,12 @@ import org.junit.rules.TemporaryFolder
 class DownloadCoordinatorTest {
     @get:Rule val temp = TemporaryFolder()
     @Test fun repeatedAndDifferentSelectionsCannotStartConcurrentDownloads() = runTest {
-        val app = downloadApp()
+        val app = preparedApp()
         val snapshot = CatalogSnapshot(syncedAt = TEST_NOW, apps = listOf(app, app.copy(repositoryId = 99)))
         val gate = CompletableDeferred<Unit>()
         var calls = 0
         val controller = DownloadCoordinator(this, { snapshot }, DownloadFiles(temp.newFolder()) { Long.MAX_VALUE },
-            binaryClient { calls++; binaryResponse(it) }, { _, _ -> gate.await() }, StandardTestDispatcher(testScheduler))
+            binaryClient { calls++; binaryResponse(it, APK_BYTES) }, { _, _ -> gate.await() }, fakeInspector(), { TEST_NOW }, StandardTestDispatcher(testScheduler))
         assertTrue(controller.start(app.repositoryId))
         assertFalse(controller.start(app.repositoryId)); assertFalse(controller.start(99))
         runCurrent(); assertEquals(DownloadPhase.CHECKING, controller.state.value.phase)
@@ -27,17 +27,17 @@ class DownloadCoordinatorTest {
         gate.complete(Unit)
         assertTrue(controller.start(99)); advanceUntilIdle()
         assertEquals(1, calls)
-        assertEquals(DownloadPhase.DOWNLOADED, controller.state.value.phase)
+        assertEquals(DownloadPhase.NO_OFFICIAL_SHA, controller.state.value.phase)
     }
     @Test fun invalidCatalogNeverRequestsNetworkAndManualRetryIsPossible() = runTest {
         var snapshot: CatalogSnapshot? = null
         var calls = 0
         val controller = DownloadCoordinator(this, { snapshot }, DownloadFiles(temp.newFolder()) { Long.MAX_VALUE },
-            binaryClient { calls++; binaryResponse(it) }, { _, _ -> }, StandardTestDispatcher(testScheduler))
-        controller.start(downloadApp().repositoryId); advanceUntilIdle()
+            binaryClient { calls++; binaryResponse(it, APK_BYTES) }, { _, _ -> }, fakeInspector(), { TEST_NOW }, StandardTestDispatcher(testScheduler))
+        controller.start(preparedApp().repositoryId); advanceUntilIdle()
         assertEquals(DownloadPhase.SECURITY_ERROR, controller.state.value.phase); assertEquals(0, calls)
-        snapshot = CatalogSnapshot(syncedAt = TEST_NOW, apps = listOf(downloadApp()))
-        controller.start(downloadApp().repositoryId); advanceUntilIdle()
-        assertEquals(DownloadPhase.DOWNLOADED, controller.state.value.phase); assertEquals(1, calls)
+        snapshot = CatalogSnapshot(syncedAt = TEST_NOW, apps = listOf(preparedApp()))
+        controller.start(preparedApp().repositoryId); advanceUntilIdle()
+        assertEquals(DownloadPhase.NO_OFFICIAL_SHA, controller.state.value.phase); assertEquals(1, calls)
     }
 }

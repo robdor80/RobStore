@@ -12,9 +12,13 @@ internal class DownloadFiles(val directory: File, private val available: (File) 
     init {
         if (!directory.isDirectory && !directory.mkdirs()) throw IOException("No se pudo preparar el almacenamiento privado.")
     }
+    val verifiedDirectory = File(directory, "verified").also {
+        if (!it.isDirectory && !it.mkdirs()) throw IOException("No se pudo crear el directorio de APK preparados.")
+    }
     fun cleanup() {
         // No resume across process death. At most one verified APK is retained during this session.
-        directory.listFiles()?.forEach { if (it.isFile) it.delete() }
+        directory.listFiles()?.forEach { if (it.isFile && !it.delete()) throw IOException("No se pudo limpiar un temporal.") }
+        verifiedDirectory.listFiles()?.forEach { if (it.isFile && !it.delete()) throw IOException("No se pudo limpiar un APK anterior.") }
     }
     fun partial(): File = File(directory, "${UUID.randomUUID()}.part")
     fun space(required: Long) {

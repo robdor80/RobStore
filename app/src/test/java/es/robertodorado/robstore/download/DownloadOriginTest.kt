@@ -115,7 +115,7 @@ class DownloadOriginTest {
             val client = binaryClient { if (fail) throw failure else binaryResponse(it) }
             val files = DownloadFiles(temp.newFolder()) { Long.MAX_VALUE }
             assertThrows(IOException::class.java) { files.receive(downloadApp(), client, DownloadCancellation()) { _, _ -> } }
-            assertTrue(files.directory.listFiles()!!.isEmpty())
+            assertTrue(files.directory.listFiles()!!.none { it.isFile })
             fail = false
             assertEquals(3L, files.receive(downloadApp(), client, DownloadCancellation()) { _, _ -> }.length())
         }
@@ -136,7 +136,7 @@ class DownloadOriginTest {
         assertThrows(java.util.concurrent.CancellationException::class.java) {
             files.receive(downloadApp(), binaryClient { binaryResponse(it) }, token) { a, _ -> if (a > 0) token.cancel() }
         }
-        assertTrue(files.directory.listFiles()!!.isEmpty())
+        assertTrue(files.directory.listFiles()!!.none { it.isFile })
     }
     @Test fun sizeMismatchTruncatedOversizedAndWrongLengthAreBlocked() {
         for ((bytes, length) in listOf(byteArrayOf(1) to -1L, ByteArray(4) to -1L, ByteArray(3) to 4L, ByteArray(3) to 2L)) {
@@ -144,7 +144,7 @@ class DownloadOriginTest {
             assertThrows(DownloadSecurity::class.java) {
                 files.receive(downloadApp(), binaryClient { binaryResponse(it, bytes, length = length) }, DownloadCancellation()) { _, _ -> }
             }
-            assertTrue(files.directory.listFiles()!!.isEmpty())
+            assertTrue(files.directory.listFiles()!!.none { it.isFile })
         }
     }
     @Test fun insufficientSpaceBeforeAndDuringStreamingIsRecoverable() {
@@ -154,7 +154,7 @@ class DownloadOriginTest {
             assertThrows(IOException::class.java) {
                 files.receive(downloadApp(), binaryClient { binaryResponse(it) }, DownloadCancellation()) { _, _ -> }
             }
-            assertTrue(files.directory.listFiles()!!.isEmpty())
+            assertTrue(files.directory.listFiles()!!.none { it.isFile })
         }
     }
     @Test fun restartDeletesOrphanPartAndOldVerifiedFiles() {
@@ -162,7 +162,7 @@ class DownloadOriginTest {
         java.io.File(directory, "orphan.part").writeText("partial")
         java.io.File(directory, "old.apk").writeText("old")
         DownloadFiles(directory).cleanup()
-        assertTrue(directory.listFiles()!!.isEmpty())
+        assertTrue(directory.listFiles()!!.none { it.isFile })
     }
     @Test fun readFailureClosesBodyAndDeletesPartial() {
         var closed = false
@@ -178,7 +178,7 @@ class DownloadOriginTest {
         val files = DownloadFiles(temp.newFolder()) { Long.MAX_VALUE }
         assertThrows(IOException::class.java) { files.receive(downloadApp(), client, DownloadCancellation()) { _, _ -> } }
         assertTrue(closed)
-        assertTrue(files.directory.listFiles()!!.isEmpty())
+        assertTrue(files.directory.listFiles()!!.none { it.isFile })
     }
     @Test fun compressedBodiesAreRejected() {
         val client = binaryClient { binaryResponse(it).newBuilder().header("Content-Encoding", "gzip").build() }
