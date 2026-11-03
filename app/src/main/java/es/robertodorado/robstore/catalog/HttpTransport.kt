@@ -18,7 +18,9 @@ internal class ResourceTooLarge : IOException("Recurso mayor que el límite perm
 internal class OkHttpTransport(private val client: OkHttpClient = OkHttpClient.Builder()
         .followRedirects(false).followSslRedirects(false).retryOnConnectionFailure(false)
         .connectTimeout(15, TimeUnit.SECONDS).readTimeout(20, TimeUnit.SECONDS)
-        .callTimeout(30, TimeUnit.SECONDS).build()) : HttpTransport {
+        .callTimeout(30, TimeUnit.SECONDS).build(),
+    private val onCall: (okhttp3.Call) -> Unit = {},
+) : HttpTransport {
 
     @Synchronized override fun execute(request: HttpRequest): HttpResult {
         require(request.url.scheme == "https" && request.url.host == "api.github.com" &&
@@ -28,7 +30,9 @@ internal class OkHttpTransport(private val client: OkHttpClient = OkHttpClient.B
             .header("X-GitHub-Api-Version", "2022-11-28")
             .header("User-Agent", "RobStore-Android")
         request.headers.forEach { (key, value) -> builder.header(key, value) }
-        return client.newCall(builder.build()).execute().use { response ->
+        val call = client.newCall(builder.build())
+        onCall(call)
+        return call.execute().use { response ->
             val body = response.body
             if (body != null && body.contentLength() > request.maxBytes) throw ResourceTooLarge()
             val bytes = body?.byteStream()?.let { stream ->
