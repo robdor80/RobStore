@@ -8,7 +8,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
 // State contains presentation data only; paths and install capabilities stay inside the coordinator.
-enum class DownloadPhase { AVAILABLE, CHECKING, DOWNLOADING, CANCELLING, VERIFYING, OFFICIAL_VERIFIED, NO_OFFICIAL_SHA, READY, ERROR, SECURITY_ERROR }
+enum class DownloadPhase { AVAILABLE, CHECKING, DOWNLOADING, CANCELLING, VERIFYING, OFFICIAL_VERIFIED, NO_OFFICIAL_SHA, READY, PREPARING_INSTALL, PERMISSION_PENDING, INSTALLER_OPEN, UNCONFIRMED, INSTALL_ERROR, ERROR, SECURITY_ERROR }
 data class DownloadState(
     val repositoryId: Long? = null,
     val appName: String = "",
@@ -18,7 +18,7 @@ data class DownloadState(
     val message: String? = null,
     val localSha256: String? = null,
 ) {
-    val busy get() = phase in setOf(DownloadPhase.CHECKING, DownloadPhase.DOWNLOADING, DownloadPhase.CANCELLING, DownloadPhase.VERIFYING)
+    val busy get() = phase in setOf(DownloadPhase.CHECKING, DownloadPhase.DOWNLOADING, DownloadPhase.CANCELLING, DownloadPhase.VERIFYING, DownloadPhase.PREPARING_INSTALL)
 }
 
 /** One foreground, user-initiated transfer. Other selections are rejected until cancellation finishes. */
@@ -34,7 +34,7 @@ internal class DownloadCoordinator(
 ) {
     private val mutableState = MutableStateFlow(DownloadState())
     val state = mutableState.asStateFlow()
-    private val initialized = scope.async(io) { files.cleanup() }
+    private val initialized = scope.async(io) { try { files.cleanup(); null } catch (failure: IOException) { failure } }
     private var job: Job? = null
     private var cancellation: DownloadCancellation? = null
     private var prepared: PreparedApk? = null
@@ -46,7 +46,7 @@ internal class DownloadCoordinator(
         job = scope.launch(io, start = CoroutineStart.LAZY) {
             var partial: File? = null
             try {
-                initialized.await()
+                initialized.await()?.let { throw it }
                 prepared?.file?.delete(); prepared = null
                 val app = CatalogValidation.select(snapshot(), repositoryId)
                 mutableState.value = DownloadState(repositoryId, app.name, DownloadPhase.CHECKING, expected = app.apk.size)
@@ -87,6 +87,57 @@ internal class DownloadCoordinator(
         if (state.value.phase in setOf(DownloadPhase.OFFICIAL_VERIFIED, DownloadPhase.NO_OFFICIAL_SHA)) {
             mutableState.value = state.value.copy(phase = DownloadPhase.READY)
         }
+    }
+
+    /** Rehash/reparse before creating a URI, then hand over only on an explicit install action. */
+    @Synchronized fun requestInstall(repositoryId: Long, authorized: () -> Boolean, deliver: (PreparedApk) -> Unit): Boolean {
+        if (job?.isCompleted == false || state.value.repositoryId != repositoryId || state.value.phase !in
+            setOf(DownloadPhase.READY, DownloadPhase.PERMISSION_PENDING, DownloadPhase.UNCONFIRMED, DownloadPhase.INSTALL_ERROR)) return false
+        val apk = prepared ?: return false
+        val token = DownloadCancellation()
+        cancellation = token
+        mutableState.value = state.value.copy(phase = DownloadPhase.PREPARING_INSTALL, message = null)
+        job = scope.launch(io, start = CoroutineStart.LAZY) {
+            try {
+                if (CatalogValidation.select(snapshot(), repositoryId) != apk.app) throw DownloadSecurity("El catálogo ha cambiado.")
+                apk.recheck(files, inspector, token, now())
+                token.check(); ensureActive()
+                withContext(Dispatchers.Main.immediate) {
+                    if (!authorized()) {
+                        mutableState.value = state.value.copy(phase = DownloadPhase.PERMISSION_PENDING)
+                    } else {
+                        mutableState.value = state.value.copy(phase = DownloadPhase.INSTALLER_OPEN)
+                        deliver(apk)
+                    }
+                }
+            } catch (_: CancellationException) {
+                apk.file.delete(); prepared = null
+                mutableState.value = DownloadState(repositoryId = repositoryId, message = "Preparación cancelada.")
+            } catch (_: DownloadSecurity) { blockedInstall(repositoryId) }
+            catch (_: InvalidMetadata) { blockedInstall(repositoryId) }
+            catch (_: IOException) { blockedInstall(repositoryId) }
+            catch (_: SecurityException) { installationError() }
+            catch (_: IllegalArgumentException) { installationError() }
+        }.also { it.start() }
+        return true
+    }
+    private fun blockedInstall(repositoryId: Long) {
+        prepared?.file?.delete(); prepared = null
+        mutableState.value = DownloadState(repositoryId = repositoryId, phase = DownloadPhase.SECURITY_ERROR,
+            message = "El archivo ya no supera la verificación. Descárgalo de nuevo.")
+    }
+    fun permissionChecked(granted: Boolean) {
+        if (state.value.phase == DownloadPhase.PERMISSION_PENDING) {
+            mutableState.value = state.value.copy(phase = if (granted) DownloadPhase.READY else DownloadPhase.PERMISSION_PENDING,
+                message = if (granted) "Permiso concedido. Pulsa Instalar para continuar." else "Android aún no autoriza este origen.")
+        }
+    }
+    fun installerReturned() {
+        if (state.value.phase == DownloadPhase.INSTALLER_OPEN) mutableState.value = state.value.copy(phase = DownloadPhase.UNCONFIRMED)
+    }
+    fun installationError() {
+        if (prepared != null) mutableState.value = state.value.copy(phase = DownloadPhase.INSTALL_ERROR,
+            message = "No se pudo abrir la actividad de Android. Puede no existir un instalador compatible o estar restringido.")
     }
 
     @Synchronized fun cancel() {

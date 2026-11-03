@@ -41,3 +41,26 @@ archivo corrupto/incompleto/excesivo, caducidad, rutas y limpieza tras reinicio.
 
 Se corrigió un error de compilación en la actualización del enum de cancelación
 antes de repetir el conjunto completo. Ninguna prueba omitida o deshabilitada.
+
+## C — Instalación Android y RobStyle
+
+`./gradlew testDebugUnitTest --no-daemon`: PASS, 149 pruebas, 0 fallos/errores/
+omisiones; incluye los 99 casos Debug heredados de RS-03. `git diff --check`: PASS.
+
+FileProvider privado, permiso por origen, comprobación real al volver de Ajustes,
+rehash/reparse antes de URI, instalador interactivo y resultado no confirmado.
+Pruebas oficiales del parser en API 26/33 con manifiesto sintético y sin firma;
+permiso, URI, flags, ausencia de instalador y flujos sin instalación automática.
+Compose: progreso accesible, acciones por fase, concurrencia visible, navegación,
+ViewModel retenido tras recreación y vistas compacta/amplia con fuente 200 %.
+
+Se conservan todos los métodos RS-03; dos aserciones de su antiguo botón inactivo
+y el texto que prohibía descargas se actualizan para comprobar el comportamiento
+RS-04 autorizado. No se suprimen casos. Los renders RS-03 se siguen generando.
+
+Incidencias corregidas en pruebas: caché estática de raíces de AndroidX FileProvider
+entre sandboxes Robolectric; montaje del proveedor usando ProviderInfo real del
+manifiesto. Se corrigieron los errores de compilación de ese montaje. La repetición
+completa de 149 casos fue satisfactoria, sin ampliar rutas ni exportar el proveedor.
+Los PNG al 200 % se inspeccionaron: RobStyle conservado, acción multilínea y ficha
+desplazable. No constituyen pruebas físicas ni validación de TalkBack real.
