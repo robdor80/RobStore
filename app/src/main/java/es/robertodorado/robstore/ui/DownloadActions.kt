@@ -20,7 +20,9 @@ internal fun DownloadActions(app: CatalogApp, state: DownloadState, onDownload: 
     val selected = state.repositoryId == app.repositoryId
     val phase = if (selected) state.phase else DownloadPhase.AVAILABLE
     RobCard {
-        if (!selected && state.busy) {
+        if (!selected && state.phase == DownloadPhase.INSTALLER_OPEN) {
+            Text(stringResource(R.string.other_installer, state.appName))
+        } else if (!selected && state.busy) {
             Text(stringResource(R.string.other_download, state.appName))
             RobPrimaryButton(stringResource(R.string.cancel_download), onClick = onCancel)
         } else {

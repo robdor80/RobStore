@@ -36,6 +36,7 @@ class InstallationFlowTest {
             assertFalse(coordinator.requestInstall(app.repositoryId, { true }) { deliveries++ })
             advanceUntilIdle()
             assertEquals(1, deliveries); assertEquals(DownloadPhase.INSTALLER_OPEN, coordinator.state.value.phase)
+            assertFalse(coordinator.start(app.repositoryId)) // Retain the file while Android may still read it.
             coordinator.installerReturned()
             assertEquals(DownloadPhase.UNCONFIRMED, coordinator.state.value.phase)
         } finally { Dispatchers.resetMain() }

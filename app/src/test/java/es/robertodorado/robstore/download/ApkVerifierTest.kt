@@ -42,7 +42,7 @@ class ApkVerifierTest {
             val partial = files.partial().also { it.writeBytes(APK_BYTES) }
             val app = preparedApp().let { it.copy(apk = it.apk.copy(sha256 = sha)) }
             assertThrows(DownloadSecurity::class.java) { PreparedApk.verify(partial, app, files, fakeInspector(), DownloadCancellation(), TEST_NOW) }
-            assertFalse(partial.exists()); assertTrue(files.verifiedDirectory.listFiles()!!.isEmpty())
+            assertFalse(partial.exists()); assertTrue(files.verifiedDirectory.listFiles().isNullOrEmpty())
         }
     }
     @Test fun corruptUnparseableWrongPackageTruncatedAndOversizedAreBlocked() {
@@ -70,7 +70,7 @@ class ApkVerifierTest {
         val files = DownloadFiles(temp.newFolder())
         val outside = temp.newFile("outside.part").also { it.writeBytes(APK_BYTES) }
         assertThrows(DownloadSecurity::class.java) { PreparedApk.verify(outside, preparedApp(), files, fakeInspector(), DownloadCancellation(), TEST_NOW) }
-        assertTrue(files.verifiedDirectory.listFiles()!!.isEmpty())
+        assertTrue(files.verifiedDirectory.listFiles().isNullOrEmpty())
     }
     @Test fun cancellationDuringVerificationNeverPublishes() {
         val files = DownloadFiles(temp.newFolder())
@@ -79,7 +79,7 @@ class ApkVerifierTest {
         assertThrows(java.util.concurrent.CancellationException::class.java) {
             PreparedApk.verify(part, preparedApp(), files, fakeInspector(), token, TEST_NOW)
         }
-        assertFalse(part.exists()); assertTrue(files.verifiedDirectory.listFiles()!!.isEmpty())
+        assertFalse(part.exists()); assertTrue(files.verifiedDirectory.listFiles().isNullOrEmpty())
     }
     @Test fun restartCleansPreparedAndPartialWithoutResuming() {
         val (prepared, files) = verify()

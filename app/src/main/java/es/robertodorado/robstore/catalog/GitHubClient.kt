@@ -106,5 +106,6 @@ internal fun JsonObject.long(key: String): Long = (get(key) as? JsonPrimitive)?.
     ?: throw InvalidMetadata("Campo $key ausente o incorrecto")
 internal fun JsonObject.boolean(key: String): Boolean = (get(key) as? JsonPrimitive)?.takeUnless { it.isString }?.booleanOrNull
     ?: throw InvalidMetadata("Campo $key ausente o incorrecto")
-internal fun publishedInstant(value: String): Instant = try { Instant.parse(value) }
+internal fun publishedInstant(value: String): Instant = try { Instant.parse(value).also { it.toEpochMilli() } }
     catch (_: java.time.DateTimeException) { throw InvalidMetadata("Fecha de publicación incorrecta") }
+    catch (_: ArithmeticException) { throw InvalidMetadata("Fecha de publicación fuera de rango") }

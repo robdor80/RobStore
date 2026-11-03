@@ -40,4 +40,17 @@ class DownloadCoordinatorTest {
         controller.start(preparedApp().repositoryId); advanceUntilIdle()
         assertEquals(DownloadPhase.NO_OFFICIAL_SHA, controller.state.value.phase); assertEquals(1, calls)
     }
+    @Test fun unavailableDirectoryDoesNotCrashConstructionAndManualRetryCanRecover() = runTest {
+        val root = temp.newFile("blocked-root")
+        val app = preparedApp()
+        val coordinator = DownloadCoordinator(this, { CatalogSnapshot(syncedAt = TEST_NOW, apps = listOf(app)) },
+            DownloadFiles(root) { Long.MAX_VALUE }, binaryClient { binaryResponse(it, APK_BYTES) },
+            { _, _ -> }, fakeInspector(), { TEST_NOW }, StandardTestDispatcher(testScheduler))
+        coordinator.start(app.repositoryId); advanceUntilIdle()
+        assertEquals(DownloadPhase.ERROR, coordinator.state.value.phase)
+        assertTrue(root.delete())
+        coordinator.start(app.repositoryId); advanceUntilIdle()
+        assertEquals(DownloadPhase.NO_OFFICIAL_SHA, coordinator.state.value.phase)
+    }
+
 }

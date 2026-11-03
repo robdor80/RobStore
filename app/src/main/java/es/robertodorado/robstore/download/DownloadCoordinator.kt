@@ -40,14 +40,15 @@ internal class DownloadCoordinator(
     private var prepared: PreparedApk? = null
 
     @Synchronized fun start(repositoryId: Long): Boolean {
-        if (job?.isCompleted == false) return false
+        if (job?.isCompleted == false || state.value.phase == DownloadPhase.INSTALLER_OPEN) return false
         val token = DownloadCancellation()
         cancellation = token
         job = scope.launch(io, start = CoroutineStart.LAZY) {
             var partial: File? = null
             try {
-                initialized.await()?.let { throw it }
-                prepared?.file?.delete(); prepared = null
+                initialized.await()
+                files.cleanup() // Retry a failed startup cleanup and enforce the one-file policy.
+                prepared = null
                 val app = CatalogValidation.select(snapshot(), repositoryId)
                 mutableState.value = DownloadState(repositoryId, app.name, DownloadPhase.CHECKING, expected = app.apk.size)
                 revalidate(app, token)

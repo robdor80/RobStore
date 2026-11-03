@@ -44,7 +44,7 @@ class DownloadUiTest {
             { downloads++ }, { cancels++ }, { confirms++ }, { installs++ }, { permissions++ }) }
         compose.onNodeWithText("Descargar APK").performClick(); assertEquals(1, downloads)
         compose.runOnIdle { phase = DownloadPhase.DOWNLOADING }
-        compose.onNodeWithText("4 / 8 bytes (50 %)").assertIsDisplayed()
+        compose.onNodeWithText("Bytes: 4 / 8 (50 %)").assertIsDisplayed()
         compose.onNode(SemanticsMatcher.expectValue(androidx.compose.ui.semantics.SemanticsProperties.ProgressBarRangeInfo,
             androidx.compose.ui.semantics.ProgressBarRangeInfo(0.5f, 0f..1f))).assertExists()
         compose.onNodeWithText("Cancelar descarga").performClick(); assertEquals(1, cancels)
@@ -109,6 +109,42 @@ class DownloadUiTest {
     @org.robolectric.annotation.GraphicsMode(org.robolectric.annotation.GraphicsMode.Mode.NATIVE)
     fun wideWarningAndActionRemainAccessibleAtTwoHundredPercent() = enlargedEvidence("no-sha-wide-200")
 
+    @Test @Config(qualifiers = "w360dp-h900dp")
+    @org.robolectric.annotation.GraphicsMode(org.robolectric.annotation.GraphicsMode.Mode.NATIVE)
+    fun nativeDownloadAndInstallPhaseEvidence() {
+        val app = preparedApp()
+        var phase by mutableStateOf(DownloadPhase.CHECKING)
+        render { AppDetailScreen({}, app, download = DownloadState(app.repositoryId, app.name, phase, 4, 8)) }
+        val cases = listOf(
+            DownloadPhase.CHECKING to R.string.download_checking,
+            DownloadPhase.DOWNLOADING to R.string.download_running,
+            DownloadPhase.CANCELLING to R.string.download_cancelling,
+            DownloadPhase.VERIFYING to R.string.download_verifying,
+            DownloadPhase.OFFICIAL_VERIFIED to R.string.download_official,
+            DownloadPhase.READY to R.string.download_ready,
+            DownloadPhase.PREPARING_INSTALL to R.string.download_verifying,
+            DownloadPhase.PERMISSION_PENDING to R.string.install_permission_explanation,
+            DownloadPhase.INSTALLER_OPEN to R.string.installer_open,
+            DownloadPhase.UNCONFIRMED to R.string.install_unconfirmed,
+            DownloadPhase.INSTALL_ERROR to R.string.download_error,
+            DownloadPhase.ERROR to R.string.download_error,
+            DownloadPhase.SECURITY_ERROR to R.string.download_security_error,
+        )
+        for ((value, text) in cases) {
+            compose.runOnIdle { phase = value }
+            compose.onNodeWithText(controller.get().getString(text)).performScrollTo().assertIsDisplayed()
+            compose.mainClock.advanceTimeByFrame(); compose.waitForIdle()
+            compose.runOnIdle {
+                val view = controller.get().window.decorView
+                val bitmap = android.graphics.Bitmap.createBitmap(view.width, view.height, android.graphics.Bitmap.Config.ARGB_8888)
+                view.draw(android.graphics.Canvas(bitmap))
+                val file = java.io.File("build/rs04-evidence/${BuildConfig.BUILD_TYPE}/${value.name.lowercase()}.png")
+                file.parentFile!!.mkdirs()
+                file.outputStream().use { assertTrue(bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it)) }
+            }
+        }
+    }
+
     @Test fun rotationRetainsViewModelAndNavigationKeepsTransferState() {
         controller = Robolectric.buildActivity(MainActivity::class.java).setup().visible()
         val original = ViewModelProvider(controller.get())[CatalogViewModel::class.java]
@@ -119,9 +155,9 @@ class DownloadUiTest {
         controller.get().setContent { RobStyleTheme { RobStoreApp(state = state,
             download = DownloadState(app.repositoryId, app.name, DownloadPhase.DOWNLOADING, 4, 8)) } }
         compose.onNodeWithText(app.name).performClick()
-        compose.onNodeWithText("4 / 8 bytes (50 %)").assertExists()
+        compose.onNodeWithText("Bytes: 4 / 8 (50 %)").assertExists()
         compose.onNodeWithContentDescription("Volver").performClick()
         compose.onNodeWithText(app.name).performClick()
-        compose.onNodeWithText("4 / 8 bytes (50 %)").assertExists()
+        compose.onNodeWithText("Bytes: 4 / 8 (50 %)").assertExists()
     }
 }

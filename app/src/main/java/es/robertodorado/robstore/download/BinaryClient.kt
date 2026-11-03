@@ -14,6 +14,7 @@ internal class DownloadSecurity(message: String) : IOException(message)
 internal object BinaryOrigin {
     private val cdn = setOf("release-assets.githubusercontent.com", "objects.githubusercontent.com")
     fun redirect(from: HttpUrl, location: String): HttpUrl {
+        if (location.any { it.isISOControl() || it == '\\' }) throw DownloadSecurity("Ruta de redirección incorrecta.")
         val next = from.resolve(location) ?: throw DownloadSecurity("Redirección incorrecta.")
         if (next.scheme != "https" || next.port != 443 || next.username.isNotEmpty() ||
             next.password.isNotEmpty() || next.fragment != null || next.host !in cdn) {
@@ -24,13 +25,22 @@ internal object BinaryOrigin {
 }
 
 /** Cancellation closes an active call, including a blocked socket read, and cannot lose a race with attach. */
-internal class DownloadCancellation {
+internal class DownloadCancellation(private val nanoTime: () -> Long = System::nanoTime) {
     @Volatile var cancelled = false
         private set
     private var active: Call? = null
-    @Synchronized fun attach(call: Call) { check(); active = call; if (cancelled) call.cancel() }
+    private val deadline = nanoTime() + TimeUnit.MINUTES.toNanos(15)
+    @Synchronized fun attach(call: Call) {
+        check()
+        val originalTimeout = call.timeout().timeoutNanos().takeIf { it > 0 } ?: TimeUnit.MINUTES.toNanos(5)
+        call.timeout().timeout(minOf(originalTimeout, deadline - nanoTime()).coerceAtLeast(1), TimeUnit.NANOSECONDS)
+        active = call
+    }
     @Synchronized fun cancel() { cancelled = true; active?.cancel() }
-    fun check() { if (cancelled) throw java.util.concurrent.CancellationException("Descarga cancelada") }
+    fun check() {
+        if (cancelled) throw java.util.concurrent.CancellationException("Descarga cancelada")
+        if (nanoTime() >= deadline) throw IOException("Se agotó el tiempo de la operación.")
+    }
 }
 
 internal class BinaryResponse(private val response: Response) : Closeable {
@@ -60,6 +70,11 @@ internal class BinaryClient(client: OkHttpClient = OkHttpClient()) {
             cancellation.attach(call)
             val response = call.execute()
             if (response.code == 200) {
+                val lengths = response.headers.values("Content-Length")
+                if (lengths.size > 1 || (lengths.isNotEmpty() &&
+                        (lengths.single().toLongOrNull() != app.apk.size || response.header("Transfer-Encoding") != null))) {
+                    response.close(); throw DownloadSecurity("Cabeceras de tamaño incorrectas o ambiguas.")
+                }
                 val encoding = response.header("Content-Encoding")
                 if (encoding != null && !encoding.equals("identity", true)) {
                     response.close(); throw DownloadSecurity("Codificación de descarga no admitida.")

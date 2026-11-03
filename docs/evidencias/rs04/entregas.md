@@ -64,3 +64,29 @@ manifiesto. Se corrigieron los errores de compilación de ese montaje. La repeti
 completa de 149 casos fue satisfactoria, sin ampliar rutas ni exportar el proveedor.
 Los PNG al 200 % se inspeccionaron: RobStyle conservado, acción multilínea y ficha
 desplazable. No constituyen pruebas físicas ni validación de TalkBack real.
+
+## D — Pruebas completas, CI, documentación y evidencias
+
+Validación final de fuentes: 158 Debug + 158 Release, 316 superadas, 0 fallos,
+errores u omisiones. Lint 0 errores/9 avisos; ambas compilaciones correctas.
+[Resultados y reproducción](resultados.md). Se añade comprobación automática del
+inventario original de 198 ejecuciones y del APK DEV real, con subida exclusiva
+en PR internas correctas, retención 30 días y permiso contents: read.
+
+Se completan errores de escritura, cancelación en lectura bloqueada cancelando
+Call, cabeceras ambiguas, plazo global sin alargar el timeout REST, raíz privada
+canonicalizada y bloqueo de reemplazo mientras está abierto el instalador.
+La creación de directorios se retrasa a IO; un error inicial se puede corregir
+y reintentar. Una fecha de caché fuera del rango de milisegundos se rechaza sin
+ArithmeticException. Regresiones específicas para ambos casos.
+
+Incidencias corregidas: una aserción de limpieza suponía que el directorio vacío
+ya existía, aunque una ruta rechazada no debe crearlo; se comprueba ausencia o
+vacío manteniendo el bloqueo. El verificador inicial suponía nombres de recursos
+sin optimizar en Release; ahora resuelve el nombre real desde la tabla de recursos.
+No se cambian versiones ni se relajan los controles. La repetición completa y
+la inspección corregida fueron satisfactorias.
+
+Documentación RS-04 y README reflejan funciones reales, límites, permiso por origen,
+resultado no confirmado, APK DEV frente a APK del catálogo y claves Debug efímeras.
+Pruebas físicas y auditoría independiente pendientes; PR siempre Draft.

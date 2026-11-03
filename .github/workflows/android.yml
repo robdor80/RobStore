@@ -17,6 +17,8 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - uses: actions/setup-java@v6.1.0
         with:
           distribution: temurin
@@ -34,17 +36,22 @@ jobs:
       - name: Test, lint and compile
         run: ./gradlew test lint assembleDebug assembleRelease --no-daemon
       - name: Check whitespace
-        run: git diff --check
+        run: |
+          git diff --check
+          python3 tools/check_rs04_regressions.py
+          test -z "$(git ls-files '*.apk' '*.aab' '*.jks' '*.keystore' '*.key')"
+      - name: Verify APK identity, alignment, signature and SHA-256
+        run: python3 tools/verify_rs04_apks.py
       - name: Summarize audit evidence
         if: always()
         run: |
-          python3 tools/summarize_rs03.py
-          cat app/build/rs03-summary/resultados.md >> "$GITHUB_STEP_SUMMARY"
+          python3 tools/summarize_rs03.py --output app/build/rs04-summary
+          cat app/build/rs04-summary/resultados.md >> "$GITHUB_STEP_SUMMARY"
       - name: Upload test, lint and Robolectric evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: rs03-validation-${{ github.sha }}
+          name: rs04-validation-${{ github.event.pull_request.head.sha || github.sha }}
           retention-days: 30
           if-no-files-found: error
           path: |
@@ -52,4 +59,14 @@ jobs:
             app/build/reports/tests/
             app/build/reports/lint-results*
             app/build/rs03-evidence/
-            app/build/rs03-summary/
+            app/build/rs04-summary/
+            app/build/rs04-evidence/
+            app/build/rs04-dev/verificacion.md
+      - name: Upload installable RobStore DEV APK (trusted internal PR only)
+        if: success() && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+        uses: actions/upload-artifact@v4
+        with:
+          name: robstore-dev-${{ github.event.pull_request.head.sha }}
+          retention-days: 30
+          if-no-files-found: error
+          path: app/build/rs04-dev/
