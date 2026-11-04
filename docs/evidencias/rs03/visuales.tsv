@@ -1,0 +1,19 @@
+archivo	ancho_px	alto_px	sha256	origen
+detail-long.png	360	900	8281944795b914663b225f56b48a3a5489eec0fb42d94aa632c8ce28f5e7cbec	Robolectric API 28 NATIVE; Debug; fixtures de test
+detail-technical.png	360	900	329534264a4d6b9c3c7c3d52f8e606c56cf37451f6dac3eef6d3f315a61b32a4	Robolectric API 28 NATIVE; Debug; fixtures de test
+detail.png	360	900	134cbea271cc127b784a454f59ea6037a60d948ad718f15c0c0a368b0858de0f	Robolectric API 28 NATIVE; Debug; fixtures de test
+home-1200-1.0.png	1200	1000	9d0fed9c9908252f12ef4c035d081b4762599349c335d8d8033cd97bfe3eabae	Robolectric API 28 NATIVE; Debug; fixtures de test
+home-30-error-1.0.png	360	800	88896f6399f95285b1daf948e53109996a789182228d408e7cded8a8e93d506f	Robolectric API 28 NATIVE; Debug; fixtures de test
+home-30-error-2.0.png	320	1000	2bc52fb23cee27b2f9f8738ca2b25c7dc1233faf6c37b21f0787b4206c91b763	Robolectric API 28 NATIVE; Debug; fixtures de test
+home-30-limited-1.0.png	360	800	81f45aae30bd12b6ab77d15b0c432f3567c61e3139918792c61d7bd154fa425c	Robolectric API 28 NATIVE; Debug; fixtures de test
+home-30-limited-2.0.png	320	1000	b9398d312c515f7fd21b57d550c261e0e7b5f108da5961cf4dc3d7754533dcd8	Robolectric API 28 NATIVE; Debug; fixtures de test
+home-30-stale-1.0.png	360	800	6de78e0b35f3eb9e0cb224c606f38ee1b13e4f941b3d260fe6eaafc3948196ec	Robolectric API 28 NATIVE; Debug; fixtures de test
+home-30-stale-2.0.png	320	1000	c99d3699e6e64bd71b6cf648ae4928766798f8f94fd30e88736c9c4716786b59	Robolectric API 28 NATIVE; Debug; fixtures de test
+home-320-1.0.png	320	900	b10cd1ffdf1620ce36a2e9695533bfec35a2765b01fd6172cf73d467c2072c36	Robolectric API 28 NATIVE; Debug; fixtures de test
+home-320-2.0.png	320	1000	244c3868102ac355a11f60d31c730f409df2ba02e8213d3176a6432ac0f84199	Robolectric API 28 NATIVE; Debug; fixtures de test
+home-600-1.0.png	600	900	1f23d9e4da7b0cf54f3a300f4c8f203014527dadbef92be4b4f734d87eef8a2b	Robolectric API 28 NATIVE; Debug; fixtures de test
+home-cached-error.png	360	800	198ad9b20eb2728f8ecadf7cc5a5db7d15cbbf0114151e24b9d006bcc93d5e41	Robolectric API 28 NATIVE; Debug; fixtures de test
+home-compact.png	360	800	1cce1d0dc37d1e4c1107285336ee68d8c03e7a01b8594daf9cfaad4bc831863f	Robolectric API 28 NATIVE; Debug; fixtures de test
+home-empty.png	360	800	61859ea43b71808d9ef7e68b7c97aff92970c9cd7a422a7d039d393fc1edca55	Robolectric API 28 NATIVE; Debug; fixtures de test
+home-pending-sync.png	360	800	1a2316fb03b7d7ee44242ce871ba7bf11d5f6fe61ba4bf675135e82c84bf373e	Robolectric API 28 NATIVE; Debug; fixtures de test
+settings.png	360	900	3eab05b86ffdbeb675c500aa7780d0a8b57da6a51237b1abbc6719fa7669be24	Robolectric API 28 NATIVE; Debug; fixtures de test

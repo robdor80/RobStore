@@ -47,6 +47,8 @@ class CatalogRepositoryTest {
         repository.refresh(); assertEquals(4, transport.requests.size)
         repository.refresh(); assertEquals(4, transport.requests.size)
         assertTrue(repository.state.value.message!!.contains("5 minutos"))
+        assertFalse(repository.state.value.message!!.contains(java.time.Instant.ofEpochMilli(TEST_NOW + CatalogPolicy.MANUAL_INTERVAL).toString()))
+        assertEquals(TEST_NOW + CatalogPolicy.MANUAL_INTERVAL, repository.state.value.nextRefreshAt)
         time += CatalogPolicy.MANUAL_INTERVAL
         transport.releases = listOf(fixtureRelease(tag = "new-edition"))
         transport.assets = listOf(fixtureAsset(url = "https://github.com/robdor80/Demo/releases/download/new-edition/app-release.apk"))
