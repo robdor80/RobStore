@@ -32,6 +32,7 @@ import kotlinx.coroutines.delay
 import es.robertodorado.robstore.R
 import es.robertodorado.robstore.catalog.*
 import es.robertodorado.robstore.download.*
+import es.robertodorado.robstore.inventory.*
 import es.robertodorado.robstore.ui.robstyle.*
 
 internal val LocalCatalogClock = staticCompositionLocalOf { Clock.systemDefaultZone() }
@@ -49,11 +50,12 @@ object RobRoutes {
 fun RobStoreApp(nav: NavHostController = rememberNavController(), state: CatalogState = CatalogState(loading = false),
     onRefresh: () -> Unit = {}, download: DownloadState = DownloadState(),
     onDownload: (Long) -> Unit = {}, onCancel: () -> Unit = {}, onConfirm: () -> Unit = {},
-    onInstall: (Long) -> Unit = {}, onPermission: () -> Unit = {}) {
+    onInstall: (Long) -> Unit = {}, onPermission: () -> Unit = {},
+    installed: Map<Long, CatalogApplicationStatus> = emptyMap(), onOpen: (Long) -> Unit = {}, openMessage: String? = null) {
     NavHost(navController = nav, startDestination = RobRoutes.Home) {
         composable(RobRoutes.Home) {
             HomeScreen(onSettings = { nav.navigate(RobRoutes.Settings) { launchSingleTop = true } },
-                state = state, onRefresh = onRefresh,
+                state = state, onRefresh = onRefresh, installed = installed,
                 onOpenApp = { nav.navigate(RobRoutes.appDetail(it.toString())) { launchSingleTop = true } })
         }
         composable(RobRoutes.Settings) { SettingsScreen(onBack = { nav.popBackStack() }, state = state) }
@@ -61,7 +63,9 @@ fun RobStoreApp(nav: NavHostController = rememberNavController(), state: Catalog
             val id = entry.arguments?.getString("appId")?.toLongOrNull()
             AppDetailScreen(onBack = { nav.popBackStack() }, app = state.snapshot?.apps?.find { it.repositoryId == id }, state = state,
                 download = download, onDownload = onDownload, onCancel = onCancel,
-                onConfirm = onConfirm, onInstall = onInstall, onPermission = onPermission)
+                onConfirm = onConfirm, onInstall = onInstall, onPermission = onPermission,
+                status = installed[id]?.takeIf { it.published == state.snapshot?.apps?.find { app -> app.repositoryId == id } },
+                onOpen = onOpen, openMessage = openMessage)
         }
     }
 }
@@ -87,16 +91,18 @@ private fun Screen(title: String, onBack: (() -> Unit)? = null,
 
 @Composable
 fun HomeScreen(onSettings: () -> Unit, state: CatalogState = CatalogState(loading = false),
-    onRefresh: () -> Unit = {}, onOpenApp: (Long) -> Unit = {}) {
+    onRefresh: () -> Unit = {}, onOpenApp: (Long) -> Unit = {},
+    installed: Map<Long, CatalogApplicationStatus> = emptyMap()) {
     val busy = state.loading || state.refreshing
     val refresh = { if (!busy) onRefresh() }
     ScreenFrame(stringResource(R.string.app_name), onSettings = onSettings, onRefresh = refresh, busy = busy) {
-        RobCatalogGrid(state, refresh, onOpenApp)
+        RobCatalogGrid(state, refresh, onOpenApp, installed)
     }
 }
 
 @Composable
-private fun RobCatalogGrid(state: CatalogState, onRefresh: () -> Unit, onOpenApp: (Long) -> Unit) {
+private fun RobCatalogGrid(state: CatalogState, onRefresh: () -> Unit, onOpenApp: (Long) -> Unit,
+    installed: Map<Long, CatalogApplicationStatus>) {
     val timing = refreshTiming(state.nextRefreshAt)
     val fontScale = LocalDensity.current.fontScale.coerceAtLeast(1f)
     LazyVerticalGrid(
@@ -118,7 +124,7 @@ private fun RobCatalogGrid(state: CatalogState, onRefresh: () -> Unit, onOpenApp
                 RobStatus(RobVisualState.Empty)
             }
             items(state.snapshot.apps, key = { it.repositoryId }) { app ->
-                RobAppTile(app, onClick = { onOpenApp(app.repositoryId) })
+                RobAppTile(app, onClick = { onOpenApp(app.repositoryId) }, status = installed[app.repositoryId]?.takeIf { it.published == app })
             }
         } else {
             item(key = "status", span = { GridItemSpan(maxLineSpan) }) {
@@ -139,7 +145,7 @@ private fun RobCatalogGrid(state: CatalogState, onRefresh: () -> Unit, onOpenApp
 }
 
 @Composable
-internal fun RobAppTile(app: CatalogApp, onClick: () -> Unit) {
+internal fun RobAppTile(app: CatalogApp, onClick: () -> Unit, status: CatalogApplicationStatus? = null) {
     OutlinedCard(onClick = onClick, modifier = Modifier.fillMaxWidth().testTag("app_${app.repositoryId}"),
         shape = MaterialTheme.shapes.medium,
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
@@ -150,7 +156,11 @@ internal fun RobAppTile(app: CatalogApp, onClick: () -> Unit) {
             Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text(app.name, style = MaterialTheme.typography.titleMedium, minLines = 2, maxLines = 2,
                     overflow = TextOverflow.Ellipsis)
-                Text(app.release.tag, style = MaterialTheme.typography.bodySmall,
+                ApplicationStatus(app, status)
+                val local = (status?.installation as? InstallationQuery.Installed)?.application
+                Text(if (local == null) app.release.tag else
+                    "Instalada: ${local.versionName ?: "nombre desconocido"} (${local.versionCode ?: "ilegible"})",
+                    style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
         }
@@ -272,13 +282,18 @@ fun SettingsScreen(onBack: () -> Unit, state: CatalogState = CatalogState(loadin
 @Composable
 fun AppDetailScreen(onBack: () -> Unit, app: CatalogApp? = null, state: CatalogState = CatalogState(loading = false),
     download: DownloadState = DownloadState(), onDownload: (Long) -> Unit = {}, onCancel: () -> Unit = {},
-    onConfirm: () -> Unit = {}, onInstall: (Long) -> Unit = {}, onPermission: () -> Unit = {}) {
+    onConfirm: () -> Unit = {}, onInstall: (Long) -> Unit = {}, onPermission: () -> Unit = {},
+    status: CatalogApplicationStatus? = null, onOpen: (Long) -> Unit = {}, openMessage: String? = null) {
     Screen(stringResource(R.string.detail), onBack = onBack) {
         if (app == null) {
             Text(stringResource(R.string.app_not_available))
         } else {
             RobDetailHeader(app) {
-                DownloadActions(app, download, onDownload, onCancel, onConfirm, onInstall, onPermission)
+                ApplicationStatus(app, status, detail = true)
+                if (applicationActions(app, status).canOpen) RobPrimaryButton("Abrir") { onOpen(app.repositoryId) }
+                openMessage?.let { Text(it, modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite }) }
+                DownloadActions(app, download, onDownload, onCancel, onConfirm, onInstall, onPermission,
+                    actions = applicationActions(app, status))
             }
             RobInfoSection(stringResource(R.string.description)) {
                 Text(app.description.ifBlank { stringResource(R.string.no_description) })

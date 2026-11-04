@@ -16,7 +16,8 @@ import es.robertodorado.robstore.ui.robstyle.*
 
 @Composable
 internal fun DownloadActions(app: CatalogApp, state: DownloadState, onDownload: (Long) -> Unit,
-    onCancel: () -> Unit, onConfirm: () -> Unit, onInstall: (Long) -> Unit, onPermission: () -> Unit) {
+    onCancel: () -> Unit, onConfirm: () -> Unit, onInstall: (Long) -> Unit, onPermission: () -> Unit,
+    actions: ApplicationActions = ApplicationActions("Descargar APK", false)) {
     val selected = state.repositoryId == app.repositoryId
     val phase = if (selected) state.phase else DownloadPhase.AVAILABLE
     RobCard {
@@ -42,7 +43,8 @@ internal fun DownloadActions(app: CatalogApp, state: DownloadState, onDownload: 
                 DownloadPhase.SECURITY_ERROR -> R.string.download_security_error
             }
             // Only phase text is a live region. Byte updates are queryable without repeated announcements.
-            Text(stringResource(status), modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+            Text(if (phase == DownloadPhase.AVAILABLE && actions.downloadLabel == null)
+                "No hay una actualización del catálogo que instalar desde aquí." else stringResource(status), modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
                 style = MaterialTheme.typography.bodyMedium)
             if (selected) state.message?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
             if (phase == DownloadPhase.DOWNLOADING) {
@@ -55,10 +57,10 @@ internal fun DownloadActions(app: CatalogApp, state: DownloadState, onDownload: 
                 LinearProgressIndicator(Modifier.fillMaxWidth())
             }
             when (phase) {
-                DownloadPhase.AVAILABLE -> RobPrimaryButton(stringResource(R.string.download_apk)) { onDownload(app.repositoryId) }
+                DownloadPhase.AVAILABLE -> actions.downloadLabel?.let { label -> RobPrimaryButton(label) { onDownload(app.repositoryId) } }
                 DownloadPhase.CHECKING, DownloadPhase.DOWNLOADING, DownloadPhase.VERIFYING,
                 DownloadPhase.PREPARING_INSTALL -> RobPrimaryButton(stringResource(R.string.cancel_download), onClick = onCancel)
-                DownloadPhase.ERROR, DownloadPhase.SECURITY_ERROR -> RobPrimaryButton(stringResource(R.string.retry)) { onDownload(app.repositoryId) }
+                DownloadPhase.ERROR, DownloadPhase.SECURITY_ERROR -> if (actions.downloadLabel != null) RobPrimaryButton(stringResource(R.string.retry)) { onDownload(app.repositoryId) }
                 DownloadPhase.OFFICIAL_VERIFIED -> RobPrimaryButton(stringResource(R.string.continue_install), onClick = onConfirm)
                 DownloadPhase.NO_OFFICIAL_SHA -> RobPrimaryButton(stringResource(R.string.confirm_without_sha), onClick = onConfirm)
                 DownloadPhase.READY, DownloadPhase.UNCONFIRMED, DownloadPhase.INSTALL_ERROR ->

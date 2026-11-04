@@ -39,7 +39,8 @@ fun RobCard(onClick: (() -> Unit)? = null, content: @Composable ColumnScope.() -
 
 @Composable
 fun RobPrimaryButton(label: String, enabled: Boolean = true, onClick: () -> Unit) {
-    Button(onClick = onClick, enabled = enabled) { Text(label) }
+    Button(onClick = onClick, enabled = enabled,
+        modifier = Modifier.sizeIn(minWidth = 48.dp, minHeight = 48.dp)) { Text(label) }
 }
 
 @Composable

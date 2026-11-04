@@ -56,7 +56,6 @@
     <string name="origin_topic">Topic: %1$s</string>
     <string name="refresh_limited">Comprobación aplazada. Espera hasta la próxima hora permitida.</string>
     <string name="no_diagnostics">Sin incidencias registradas.</string>
-    <string name="download_apk">Descargar APK</string>
     <string name="cancel_download">Cancelar descarga</string>
     <string name="download_available">Disponible para descargar.</string>
     <string name="download_checking">Comprobando origen y metadatos actuales…</string>
@@ -72,12 +71,12 @@
     <string name="install_permission_explanation">Permiso pendiente. Android exige autorizar a RobStore para solicitar instalaciones desde este origen. Concede el permiso en Ajustes si deseas continuar.</string>
     <string name="open_install_settings">Autorizar en Android</string>
     <string name="installer_open">Instalador abierto. Solicitud entregada a Android; resultado aún no confirmado.</string>
-    <string name="install_unconfirmed">Resultado de instalación no confirmado. Abrir o regresar del instalador no acredita una instalación correcta.</string>
+    <string name="install_unconfirmed">Resultado de instalación no confirmado. Abrir o regresar del instalador no acredita una instalación correcta. Puede haberse cancelado, fallado o rechazado por firma incompatible. Consulta la versión instalada antes de reintentar.</string>
     <string name="download_error">Error recuperable. Puedes volver a intentarlo.</string>
     <string name="download_security_error">Archivo bloqueado por seguridad o integridad. No se permite instalarlo.</string>
     <string name="download_progress">Bytes: %1$d / %2$d (%3$d %%)</string>
     <string name="local_sha">SHA-256 local: %1$s</string>
-    <string name="integrity_limits">El análisis del paquete no verifica criptográficamente su firma ni garantiza la autenticidad del editor. Android comprobará firma y compatibilidad al instalar.</string>
+    <string name="integrity_limits">El análisis del paquete no verifica criptográficamente su firma ni garantiza la autenticidad del editor. Android comprobará firma y compatibilidad al instalar. No se garantiza la conservación de datos si los certificados son incompatibles.</string>
     <string name="other_download">Hay una descarga en curso: %1$s. Cancélala o espera antes de descargar otra aplicación.</string>
     <string name="other_installer">El instalador de Android está abierto para %1$s. Regresa de él antes de preparar otro APK.</string>
 </resources>

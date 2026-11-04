@@ -1,6 +1,7 @@
 package es.robertodorado.robstore.download
 
 import es.robertodorado.robstore.catalog.*
+import es.robertodorado.robstore.inventory.*
 import java.io.File
 import java.io.IOException
 import kotlinx.coroutines.*
@@ -31,6 +32,7 @@ internal class DownloadCoordinator(
     private val inspector: ArchiveInspector,
     private val now: () -> Long = System::currentTimeMillis,
     private val io: CoroutineDispatcher = Dispatchers.IO,
+    private val applications: InstalledApplications = InstalledApplications { InstallationQuery.Unknown },
 ) {
     private val mutableState = MutableStateFlow(DownloadState())
     val state = mutableState.asStateFlow()
@@ -102,8 +104,15 @@ internal class DownloadCoordinator(
             try {
                 if (CatalogValidation.select(snapshot(), repositoryId) != apk.app) throw DownloadSecurity("El catálogo ha cambiado.")
                 apk.recheck(files, inspector, token, now())
+                // Fresh local observation after rehashing, including after an external update during download.
+                val installed = applications.query(apk.app.packageName)
+                if (installed is InstallationQuery.Installed &&
+                    installed.application.versionCode?.let { it > apk.metadata.versionCode } == true) {
+                    throw DownloadSecurity("La versión instalada es superior al APK.")
+                }
                 token.check(); ensureActive()
                 withContext(Dispatchers.Main.immediate) {
+                    if (CatalogValidation.select(snapshot(), repositoryId) != apk.app) throw DownloadSecurity("El catálogo ha cambiado.")
                     if (!authorized()) {
                         mutableState.value = state.value.copy(phase = DownloadPhase.PERMISSION_PENDING)
                     } else {
@@ -125,7 +134,7 @@ internal class DownloadCoordinator(
     private fun blockedInstall(repositoryId: Long) {
         prepared?.file?.delete(); prepared = null
         mutableState.value = DownloadState(repositoryId = repositoryId, phase = DownloadPhase.SECURITY_ERROR,
-            message = "El archivo ya no supera la verificación. Descárgalo de nuevo.")
+            message = "Instalación bloqueada: el catálogo o el APK cambió, caducó o la versión instalada es superior. Archivo eliminado; revisa el catálogo antes de descargar de nuevo.")
     }
     fun permissionChecked(granted: Boolean) {
         if (state.value.phase == DownloadPhase.PERMISSION_PENDING) {

@@ -78,6 +78,9 @@ internal class PreparedApk private constructor(
             if (app.apk.sha256 != null && !hash.equals(app.apk.sha256, true)) throw DownloadSecurity("SHA-256 distinto de la referencia oficial.")
             val metadata = inspector.inspect(file) ?: throw DownloadSecurity("Android no reconoce este APK.")
             if (metadata.packageName != app.packageName) throw DownloadSecurity("El paquete Android no coincide con el catálogo.")
+            if (app.release.versionCode != null && metadata.versionCode != app.release.versionCode) {
+                throw DownloadSecurity("El versionCode del APK no coincide con el catálogo.")
+            }
             token.check()
             return hash to metadata
         }
