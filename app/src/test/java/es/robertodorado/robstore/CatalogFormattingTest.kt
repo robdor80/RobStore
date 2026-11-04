@@ -53,7 +53,8 @@ class CatalogFormattingTest {
         assertTrue(displayDate(deadline, ZoneId.of("Europe/Madrid"), spanish)!!.endsWith("3:00"))
         val pacific = displayDate(deadline, ZoneId.of("America/Los_Angeles"), Locale.US)!!
         assertTrue(pacific.contains("Mar 28, 2026"))
-        assertTrue(pacific.contains("6:00 PM"))
+        // CLDR in Java 21 uses a narrow non-breaking space before AM/PM.
+        assertTrue(pacific.replace('\u202f', ' ').replace('\u00a0', ' ').contains("6:00 PM"))
         assertEquals(RefreshAvailability.Allowed, refreshAvailability(deadline, Clock.offset(clock, java.time.Duration.ofMillis(1))))
     }
 

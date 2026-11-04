@@ -38,7 +38,10 @@ class MainActivity : ComponentActivity() {
                 val settings = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {
                     model.permissionReturned()
                 }
-                LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { model.permissionReturned() }
+                LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
+                    model.permissionReturned()
+                    model.refreshInstalled()
+                }
                 CompositionLocalProvider(LocalCatalogIcons provides model.icons) {
                     RobStoreApp(state = state, onRefresh = model::refresh, download = download,
                         onDownload = model::download, onCancel = model::cancelDownload,

@@ -4,7 +4,12 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import java.io.File
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.distinctUntilChanged
+import es.robertodorado.robstore.inventory.*
 import es.robertodorado.robstore.download.*
 import es.robertodorado.robstore.install.AndroidInstaller
 import android.content.Intent
@@ -14,12 +19,21 @@ internal object CatalogRuntime {
     var transportFactory: () -> HttpTransport = ::OkHttpTransport
 }
 
-class CatalogViewModel(application: Application) : AndroidViewModel(application) {
+class CatalogViewModel internal constructor(
+    application: Application,
+    applications: InstalledApplications,
+    io: CoroutineDispatcher,
+) : AndroidViewModel(application) {
+    constructor(application: Application) : this(
+        application, AndroidInstalledApplications(application.packageManager), Dispatchers.IO,
+    )
     private val cache = FileCatalogCache(File(application.filesDir, "catalog"))
     private val client = GitHubClient(CatalogRuntime.transportFactory(), cache)
-    private val repository = CatalogRepository(cache, client)
+    private val repository = CatalogRepository(cache, client, io = io)
     internal val icons = CatalogIconLoader(File(application.cacheDir, "catalog-icons"), client)
     val state = repository.state
+    private val inventory = CatalogInventory(applications, io)
+    val installedState = inventory.state
     private val installer = AndroidInstaller(application)
     private val downloads = DownloadCoordinator(viewModelScope, { state.value.snapshot },
         DownloadFiles(File(application.filesDir, "apk-downloads")), BinaryClient(),
@@ -36,10 +50,19 @@ class CatalogViewModel(application: Application) : AndroidViewModel(application)
     }
     fun permissionSettings(): Intent = installer.settings()
     fun permissionReturned() = downloads.permissionChecked(installer.authorized())
-    fun installerReturned() = downloads.installerReturned()
+    fun installerReturned() {
+        downloads.installerReturned()
+        refreshInstalled()
+    }
+    fun refreshInstalled() { viewModelScope.launch { inventory.refresh(state.value.snapshot?.apps.orEmpty()) } }
     fun installationError() = downloads.installationError()
     override fun onCleared() { downloads.close(); super.onCleared() }
 
-    init { viewModelScope.launch { repository.initialize() } }
+    init {
+        viewModelScope.launch {
+            state.map { it.snapshot?.apps.orEmpty() }.distinctUntilChanged().collect { inventory.refresh(it) }
+        }
+        viewModelScope.launch { repository.initialize() }
+    }
     fun refresh() { viewModelScope.launch { repository.refresh() } }
 }

@@ -63,3 +63,11 @@ dependencies {
     testImplementation(libs.junit)
     testImplementation(libs.robolectric)
 }
+
+// Robolectric's Android 36 runtime requires Java 21; app compilation remains Java 17.
+val testJavaToolchains = extensions.getByType<org.gradle.jvm.toolchain.JavaToolchainService>()
+tasks.withType<Test>().configureEach {
+    javaLauncher.set(testJavaToolchains.launcherFor {
+        languageVersion.set(JavaLanguageVersion.of(21))
+    })
+}

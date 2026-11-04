@@ -22,7 +22,9 @@ jobs:
       - uses: actions/setup-java@v6.1.0
         with:
           distribution: temurin
-          java-version: '17'
+          java-version: |
+            21
+            17
       - uses: android-actions/setup-android@v4.0.4
         with:
           cmdline-tools-version: '13114758'
@@ -34,14 +36,14 @@ jobs:
       - name: Enable Gradle Wrapper
         run: chmod +x gradlew
       - name: Test, lint and compile
-        run: ./gradlew test lint assembleDebug assembleRelease --no-daemon
+        run: ./gradlew -I tools/unsigned-validation.gradle test lint lintRelease assembleDebug assembleRelease --no-daemon
       - name: Check whitespace
         run: |
           git diff --check
           python3 tools/check_rs04_regressions.py
           test -z "$(git ls-files '*.apk' '*.aab' '*.jks' '*.keystore' '*.key')"
       - name: Verify APK identity, alignment, signature and SHA-256
-        run: python3 tools/verify_rs04_apks.py
+        run: python3 tools/verify_rs04_apks.py --unsigned-debug
       - name: Summarize audit evidence
         if: always()
         run: |
@@ -62,11 +64,3 @@ jobs:
             app/build/rs04-summary/
             app/build/rs04-evidence/
             app/build/rs04-dev/verificacion.md
-      - name: Upload installable RobStore DEV APK (trusted internal PR only)
-        if: success() && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
-        uses: actions/upload-artifact@v4
-        with:
-          name: robstore-dev-${{ github.event.pull_request.head.sha }}
-          retention-days: 30
-          if-no-files-found: error
-          path: app/build/rs04-dev/

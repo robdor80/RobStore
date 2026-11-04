@@ -1,0 +1,6 @@
+// Local validation only: do not let AGP create a private debug signing key.
+allprojects {
+    plugins.withId('com.android.application') {
+        android.buildTypes.configureEach { signingConfig = null }
+    }
+}

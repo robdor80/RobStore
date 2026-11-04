@@ -36,7 +36,11 @@ data class CatalogApp(
 enum class Availability { AVAILABLE }
 
 @Serializable
-data class CatalogRelease(val id: Long, val tag: String, val publishedAt: String, val notes: String)
+data class CatalogRelease(
+    val id: Long, val tag: String, val publishedAt: String, val notes: String,
+    val versionCode: Long? = null,
+    val versionName: String? = null,
+)
 
 /** A GitHub digest is publisher metadata, not proof of APK integrity or signing. */
 @Serializable
