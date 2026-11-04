@@ -28,14 +28,14 @@ internal class AndroidArchiveInspector(private val packages: PackageManager) : A
 /** Only this verifier can mint a prepared-file capability; UI state never contains filesystem paths. */
 internal class PreparedApk private constructor(
     val file: File,
-    val app: CatalogApp,
+    val app: ReleaseArtifact,
     val localSha256: String,
     val metadata: ArchiveMetadata,
     val preparedAt: Long,
 ) {
     val officialDigestMatched get() = app.apk.sha256 != null
     companion object {
-        fun verify(partial: File, app: CatalogApp, files: DownloadFiles, inspector: ArchiveInspector,
+        fun verify(partial: File, app: ReleaseArtifact, files: DownloadFiles, inspector: ArchiveInspector,
             token: DownloadCancellation, now: Long): PreparedApk {
             if (partial.parentFile?.canonicalFile != files.directory.canonicalFile ||
                 partial.canonicalFile != partial.absoluteFile || !partial.name.endsWith(".part")) {
@@ -49,9 +49,9 @@ internal class PreparedApk private constructor(
                 return PreparedApk(final, app, result.first, result.second, now)
             } catch (failure: Throwable) { partial.delete(); throw failure }
         }
-        private fun inspect(file: File, app: CatalogApp, inspector: ArchiveInspector,
+        private fun inspect(file: File, app: ReleaseArtifact, inspector: ArchiveInspector,
             token: DownloadCancellation): Pair<String, ArchiveMetadata> {
-            if (!CatalogValidation.app(app) || !file.isFile || file.length() != app.apk.size) {
+            if (!validArtifact(app) || !file.isFile || file.length() != app.apk.size) {
                 throw DownloadSecurity("Tamaño o metadatos del archivo incorrectos.")
             }
             val digest = MessageDigest.getInstance("SHA-256")

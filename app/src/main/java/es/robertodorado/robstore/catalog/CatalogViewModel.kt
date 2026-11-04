@@ -4,6 +4,7 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import java.io.File
+import es.robertodorado.robstore.update.*
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -41,12 +42,24 @@ class CatalogViewModel internal constructor(
     private val launcher = ApplicationLauncher(applications, io)
     private val mutableOpenMessage = MutableStateFlow<String?>(null)
     val openMessage = mutableOpenMessage.asStateFlow()
+    private val updates = SelfUpdateRepository(application.packageName, applications,
+        FileCatalogCache(File(application.filesDir, "self-update")), cache, SelfUpdateDiscovery(client), io = io)
+    val selfUpdateState = updates.state
+    fun checkSelfUpdate() { viewModelScope.launch { updates.check() } }
+    fun downloadSelfUpdate() { downloads.startSelfUpdate() }
+    fun installSelfUpdate(deliver: (Intent) -> Unit) {
+        downloads.requestSelfInstall(installer::authorized) { deliver(installer.intent(it)) }
+        refreshInstalled()
+    }
     private val downloads = DownloadCoordinator(viewModelScope, { state.value.snapshot },
         DownloadFiles(File(application.filesDir, "apk-downloads")), BinaryClient(),
         { app, token ->
             val transport = OkHttpTransport(onCall = token::attach)
             CatalogDiscovery(GitHubClient(transport, cache), System::currentTimeMillis).revalidate(app)
-        }, AndroidArchiveInspector(application.packageManager), applications = applications)
+        }, AndroidArchiveInspector(application.packageManager), applications = applications,
+        selfUpdate = updates::selected, revalidateSelf = { candidate, token ->
+            SelfUpdateDiscovery(GitHubClient(OkHttpTransport(onCall = token::attach), cache)).revalidate(candidate)
+        })
     val downloadState = downloads.state
     private fun catalogTarget(repositoryId: Long) = state.value.snapshot?.apps?.find {
         it.repositoryId == repositoryId && it.packageName !in setOf("es.robertodorado.robstore", "es.robertodorado.robstore.debug")
@@ -77,7 +90,10 @@ class CatalogViewModel internal constructor(
         downloads.installerReturned()
         refreshInstalled()
     }
-    fun refreshInstalled() { viewModelScope.launch { inventory.refresh(state.value.snapshot?.apps.orEmpty()) } }
+    fun refreshInstalled() { viewModelScope.launch {
+        inventory.refresh(state.value.snapshot?.apps.orEmpty())
+        updates.observeInstalled()
+    } }
     fun installationError() = downloads.installationError()
     override fun onCleared() { downloads.close(); super.onCleared() }
 
@@ -86,6 +102,7 @@ class CatalogViewModel internal constructor(
             state.map { it.snapshot?.apps.orEmpty() }.distinctUntilChanged().collect { inventory.refresh(it) }
         }
         viewModelScope.launch { repository.initialize() }
+        viewModelScope.launch { updates.initialize() }
     }
     fun refresh() { viewModelScope.launch { repository.refresh() } }
 }

@@ -2,6 +2,7 @@ package es.robertodorado.robstore.download
 
 import es.robertodorado.robstore.catalog.*
 import es.robertodorado.robstore.inventory.*
+import es.robertodorado.robstore.update.SelfUpdateCandidate
 import java.io.File
 import java.io.IOException
 import kotlinx.coroutines.*
@@ -22,6 +23,11 @@ data class DownloadState(
     val busy get() = phase in setOf(DownloadPhase.CHECKING, DownloadPhase.DOWNLOADING, DownloadPhase.CANCELLING, DownloadPhase.VERIFYING, DownloadPhase.PREPARING_INSTALL)
 }
 
+internal sealed interface DownloadTarget {
+    data class Catalog(val id: Long) : DownloadTarget
+    data object SelfUpdate : DownloadTarget
+}
+
 /** One foreground, user-initiated transfer. Other selections are rejected until cancellation finishes. */
 internal class DownloadCoordinator(
     private val scope: CoroutineScope,
@@ -33,6 +39,8 @@ internal class DownloadCoordinator(
     private val now: () -> Long = System::currentTimeMillis,
     private val io: CoroutineDispatcher = Dispatchers.IO,
     private val applications: InstalledApplications = InstalledApplications { InstallationQuery.Unknown },
+    private val selfUpdate: () -> SelfUpdateCandidate = { throw InvalidMetadata("Canal no configurado") },
+    private val revalidateSelf: suspend (SelfUpdateCandidate, DownloadCancellation) -> Unit = { _, _ -> throw InvalidMetadata("Canal no configurado") },
 ) {
     private val mutableState = MutableStateFlow(DownloadState())
     val state = mutableState.asStateFlow()
@@ -41,8 +49,22 @@ internal class DownloadCoordinator(
     private var cancellation: DownloadCancellation? = null
     private var prepared: PreparedApk? = null
 
-    @Synchronized fun start(repositoryId: Long): Boolean {
+    private var target: DownloadTarget? = null
+    private fun select(destination: DownloadTarget): ReleaseArtifact = when (destination) {
+        is DownloadTarget.Catalog -> CatalogValidation.select(snapshot(), destination.id)
+        DownloadTarget.SelfUpdate -> selfUpdate()
+    }
+    private suspend fun validateRemote(app: ReleaseArtifact, token: DownloadCancellation) = when (app) {
+        is CatalogApp -> revalidate(app, token)
+        is SelfUpdateCandidate -> revalidateSelf(app, token)
+        else -> throw InvalidMetadata("Destino desconocido")
+    }
+    fun start(repositoryId: Long): Boolean = start(DownloadTarget.Catalog(repositoryId))
+    fun startSelfUpdate(): Boolean = start(DownloadTarget.SelfUpdate)
+    @Synchronized private fun start(destination: DownloadTarget): Boolean {
+        val repositoryId = (destination as? DownloadTarget.Catalog)?.id ?: SELF_UPDATE_ID
         if (job?.isCompleted == false || state.value.phase == DownloadPhase.INSTALLER_OPEN) return false
+        target = destination
         val token = DownloadCancellation()
         cancellation = token
         job = scope.launch(io, start = CoroutineStart.LAZY) {
@@ -51,16 +73,17 @@ internal class DownloadCoordinator(
                 initialized.await()
                 files.cleanup() // Retry a failed startup cleanup and enforce the one-file policy.
                 prepared = null
-                val app = CatalogValidation.select(snapshot(), repositoryId)
-                mutableState.value = DownloadState(repositoryId, app.name, DownloadPhase.CHECKING, expected = app.apk.size)
-                revalidate(app, token)
+                val app = select(destination)
+                mutableState.value = DownloadState(repositoryId, if (app is CatalogApp) app.name else "RobStore", DownloadPhase.CHECKING, expected = app.apk.size)
+                validateRemote(app, token)
                 token.check(); ensureActive()
                 mutableState.value = mutableState.value.copy(phase = DownloadPhase.DOWNLOADING)
                 partial = files.receive(app, client, token) { received, expected ->
                     if (!token.cancelled) mutableState.value = mutableState.value.copy(received = received, expected = expected)
                 }
                 token.check(); ensureActive()
-                if (CatalogValidation.select(snapshot(), repositoryId) != app) throw DownloadSecurity("El catálogo ha cambiado.")
+                if (destination == DownloadTarget.SelfUpdate) validateRemote(app, token)
+                if (select(destination) != app) throw DownloadSecurity("El catálogo ha cambiado.")
                 mutableState.value = mutableState.value.copy(phase = DownloadPhase.VERIFYING)
                 val verified = PreparedApk.verify(partial, app, files, inspector, token, now())
                 prepared = verified
@@ -73,7 +96,8 @@ internal class DownloadCoordinator(
             } catch (_: InvalidMetadata) {
                 partial?.delete(); prepared?.file?.delete(); prepared = null
                 mutableState.value = DownloadState(repositoryId = repositoryId, phase = DownloadPhase.SECURITY_ERROR,
-                    message = "Metadatos inconsistentes. Actualiza el catálogo antes de reintentar.")
+                    message = if (destination == DownloadTarget.SelfUpdate) "La publicación de RobStore ha cambiado o es inconsistente. Comprueba de nuevo las actualizaciones."
+                    else "Metadatos inconsistentes. Actualiza el catálogo antes de reintentar.")
             } catch (_: DownloadSecurity) {
                 partial?.delete(); prepared?.file?.delete(); prepared = null
                 mutableState.value = DownloadState(repositoryId = repositoryId, phase = DownloadPhase.SECURITY_ERROR,
@@ -93,16 +117,21 @@ internal class DownloadCoordinator(
     }
 
     /** Rehash/reparse before creating a URI, then hand over only on an explicit install action. */
+    companion object { const val SELF_UPDATE_ID = -1L }
+    fun requestSelfInstall(authorized: () -> Boolean, deliver: (PreparedApk) -> Unit): Boolean =
+        requestInstall(SELF_UPDATE_ID, authorized, deliver)
     @Synchronized fun requestInstall(repositoryId: Long, authorized: () -> Boolean, deliver: (PreparedApk) -> Unit): Boolean {
         if (job?.isCompleted == false || state.value.repositoryId != repositoryId || state.value.phase !in
             setOf(DownloadPhase.READY, DownloadPhase.PERMISSION_PENDING, DownloadPhase.UNCONFIRMED, DownloadPhase.INSTALL_ERROR)) return false
         val apk = prepared ?: return false
+        val destination = target ?: return false
         val token = DownloadCancellation()
         cancellation = token
         mutableState.value = state.value.copy(phase = DownloadPhase.PREPARING_INSTALL, message = null)
         job = scope.launch(io, start = CoroutineStart.LAZY) {
             try {
-                if (CatalogValidation.select(snapshot(), repositoryId) != apk.app) throw DownloadSecurity("El catálogo ha cambiado.")
+                if (select(destination) != apk.app) throw DownloadSecurity("El catálogo ha cambiado.")
+                if (destination == DownloadTarget.SelfUpdate) validateRemote(apk.app, token)
                 apk.recheck(files, inspector, token, now())
                 // Fresh local observation after rehashing, including after an external update during download.
                 val installed = applications.query(apk.app.packageName)
@@ -110,9 +139,11 @@ internal class DownloadCoordinator(
                     installed.application.versionCode?.let { it > apk.metadata.versionCode } == true) {
                     throw DownloadSecurity("La versión instalada es superior al APK.")
                 }
+                if (destination == DownloadTarget.SelfUpdate) requireNewerSelf(apk)
                 token.check(); ensureActive()
                 withContext(Dispatchers.Main.immediate) {
-                    if (CatalogValidation.select(snapshot(), repositoryId) != apk.app) throw DownloadSecurity("El catálogo ha cambiado.")
+                    if (select(destination) != apk.app) throw DownloadSecurity("El catálogo ha cambiado.")
+                    if (destination == DownloadTarget.SelfUpdate) requireNewerSelf(apk)
                     if (!authorized()) {
                         mutableState.value = state.value.copy(phase = DownloadPhase.PERMISSION_PENDING)
                     } else {
@@ -130,6 +161,11 @@ internal class DownloadCoordinator(
             catch (_: IllegalArgumentException) { installationError() }
         }.also { it.start() }
         return true
+    }
+    private fun requireNewerSelf(apk: PreparedApk) {
+        val installed = (applications.query(apk.app.packageName) as? InstallationQuery.Installed)?.application
+        if (installed?.packageName != apk.app.packageName || installed.versionCode?.let { it < apk.metadata.versionCode } != true ||
+            !apk.officialDigestMatched) throw DownloadSecurity("No se demuestra una actualización propia superior")
     }
     private fun blockedInstall(repositoryId: Long) {
         prepared?.file?.delete(); prepared = null

@@ -33,6 +33,7 @@ import es.robertodorado.robstore.R
 import es.robertodorado.robstore.catalog.*
 import es.robertodorado.robstore.download.*
 import es.robertodorado.robstore.inventory.*
+import es.robertodorado.robstore.update.*
 import es.robertodorado.robstore.ui.robstyle.*
 
 internal val LocalCatalogClock = staticCompositionLocalOf { Clock.systemDefaultZone() }
@@ -51,14 +52,19 @@ fun RobStoreApp(nav: NavHostController = rememberNavController(), state: Catalog
     onRefresh: () -> Unit = {}, download: DownloadState = DownloadState(),
     onDownload: (Long) -> Unit = {}, onCancel: () -> Unit = {}, onConfirm: () -> Unit = {},
     onInstall: (Long) -> Unit = {}, onPermission: () -> Unit = {},
-    installed: Map<Long, CatalogApplicationStatus> = emptyMap(), onOpen: (Long) -> Unit = {}, openMessage: String? = null) {
+    installed: Map<Long, CatalogApplicationStatus> = emptyMap(), onOpen: (Long) -> Unit = {}, openMessage: String? = null,
+    selfUpdate: SelfUpdateState = SelfUpdateState(), onCheckSelfUpdate: () -> Unit = {},
+    onDownloadSelfUpdate: () -> Unit = {}, onInstallSelfUpdate: () -> Unit = {}) {
     NavHost(navController = nav, startDestination = RobRoutes.Home) {
         composable(RobRoutes.Home) {
             HomeScreen(onSettings = { nav.navigate(RobRoutes.Settings) { launchSingleTop = true } },
                 state = state, onRefresh = onRefresh, installed = installed,
+                updateNotice = selfUpdate.available,
                 onOpenApp = { nav.navigate(RobRoutes.appDetail(it.toString())) { launchSingleTop = true } })
         }
-        composable(RobRoutes.Settings) { SettingsScreen(onBack = { nav.popBackStack() }, state = state) }
+        composable(RobRoutes.Settings) { SettingsScreen(onBack = { nav.popBackStack() }, state = state, selfUpdate = selfUpdate,
+            download = download, onCheck = onCheckSelfUpdate, onDownload = onDownloadSelfUpdate,
+            onCancel = onCancel, onConfirm = onConfirm, onInstall = onInstallSelfUpdate, onPermission = onPermission) }
         composable(RobRoutes.AppDetail, arguments = listOf(navArgument("appId") { type = NavType.StringType })) { entry ->
             val id = entry.arguments?.getString("appId")?.toLongOrNull()
             AppDetailScreen(onBack = { nav.popBackStack() }, app = state.snapshot?.apps?.find { it.repositoryId == id }, state = state,
@@ -92,17 +98,17 @@ private fun Screen(title: String, onBack: (() -> Unit)? = null,
 @Composable
 fun HomeScreen(onSettings: () -> Unit, state: CatalogState = CatalogState(loading = false),
     onRefresh: () -> Unit = {}, onOpenApp: (Long) -> Unit = {},
-    installed: Map<Long, CatalogApplicationStatus> = emptyMap()) {
+    installed: Map<Long, CatalogApplicationStatus> = emptyMap(), updateNotice: Boolean = false) {
     val busy = state.loading || state.refreshing
     val refresh = { if (!busy) onRefresh() }
     ScreenFrame(stringResource(R.string.app_name), onSettings = onSettings, onRefresh = refresh, busy = busy) {
-        RobCatalogGrid(state, refresh, onOpenApp, installed)
+        RobCatalogGrid(state, refresh, onOpenApp, installed, updateNotice, onSettings)
     }
 }
 
 @Composable
 private fun RobCatalogGrid(state: CatalogState, onRefresh: () -> Unit, onOpenApp: (Long) -> Unit,
-    installed: Map<Long, CatalogApplicationStatus>) {
+    installed: Map<Long, CatalogApplicationStatus>, updateNotice: Boolean, onSettings: () -> Unit) {
     val timing = refreshTiming(state.nextRefreshAt)
     val fontScale = LocalDensity.current.fontScale.coerceAtLeast(1f)
     LazyVerticalGrid(
@@ -112,6 +118,12 @@ private fun RobCatalogGrid(state: CatalogState, onRefresh: () -> Unit, onOpenApp
         horizontalArrangement = Arrangement.spacedBy(RobStyleDimensions.contentSpacing),
         verticalArrangement = Arrangement.spacedBy(RobStyleDimensions.contentSpacing),
     ) {
+        if (updateNotice) item(key = "self_update", span = { GridItemSpan(maxLineSpan) }) {
+            RobCard {
+                Text("Nueva versión de RobStore disponible", modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite })
+                RobPrimaryButton("Ver actualización de RobStore", onClick = onSettings)
+            }
+        }
         item(key = "heading", span = { GridItemSpan(maxLineSpan) }) {
             Text(stringResource(R.string.catalog), style = MaterialTheme.typography.titleLarge)
         }
@@ -169,7 +181,7 @@ internal fun RobAppTile(app: CatalogApp, onClick: () -> Unit, status: CatalogApp
 
 /** Re-evaluate on resume and once at expiry; no polling or background refresh. */
 @Composable
-private fun refreshTiming(nextRefreshAt: Long): RefreshAvailability {
+internal fun refreshTiming(nextRefreshAt: Long): RefreshAvailability {
     val clock = LocalCatalogClock.current
     var observedAt by remember(nextRefreshAt, clock) { mutableLongStateOf(clock.millis()) }
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { observedAt = clock.millis() }
@@ -251,8 +263,12 @@ internal fun RobSyncIndicator(state: CatalogState, technical: Boolean = false, c
 }
 
 @Composable
-fun SettingsScreen(onBack: () -> Unit, state: CatalogState = CatalogState(loading = false)) {
+fun SettingsScreen(onBack: () -> Unit, state: CatalogState = CatalogState(loading = false),
+    selfUpdate: SelfUpdateState = SelfUpdateState(), download: DownloadState = DownloadState(),
+    onCheck: () -> Unit = {}, onDownload: () -> Unit = {}, onCancel: () -> Unit = {},
+    onConfirm: () -> Unit = {}, onInstall: () -> Unit = {}, onPermission: () -> Unit = {}) {
     Screen(stringResource(R.string.settings), onBack = onBack) {
+        SelfUpdateSection(selfUpdate, download, onCheck, onDownload, onCancel, onConfirm, onInstall, onPermission)
         RobCard {
             RobSectionHeader(stringResource(R.string.origin_heading))
             Text(stringResource(R.string.origin_owner, CatalogPolicy.OWNER))

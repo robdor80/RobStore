@@ -11,14 +11,16 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import es.robertodorado.robstore.R
 import es.robertodorado.robstore.catalog.CatalogApp
+import es.robertodorado.robstore.catalog.ReleaseArtifact
 import es.robertodorado.robstore.download.*
 import es.robertodorado.robstore.ui.robstyle.*
 
 @Composable
-internal fun DownloadActions(app: CatalogApp, state: DownloadState, onDownload: (Long) -> Unit,
+internal fun DownloadActions(app: ReleaseArtifact, state: DownloadState, onDownload: (Long) -> Unit,
     onCancel: () -> Unit, onConfirm: () -> Unit, onInstall: (Long) -> Unit, onPermission: () -> Unit,
-    actions: ApplicationActions = ApplicationActions("Descargar APK", false)) {
-    val selected = state.repositoryId == app.repositoryId
+    actions: ApplicationActions = ApplicationActions("Descargar APK", false),
+    selectionId: Long = (app as? CatalogApp)?.repositoryId ?: DownloadCoordinator.SELF_UPDATE_ID) {
+    val selected = state.repositoryId == selectionId
     val phase = if (selected) state.phase else DownloadPhase.AVAILABLE
     RobCard {
         if (!selected && state.phase == DownloadPhase.INSTALLER_OPEN) {
@@ -57,14 +59,14 @@ internal fun DownloadActions(app: CatalogApp, state: DownloadState, onDownload: 
                 LinearProgressIndicator(Modifier.fillMaxWidth())
             }
             when (phase) {
-                DownloadPhase.AVAILABLE -> actions.downloadLabel?.let { label -> RobPrimaryButton(label) { onDownload(app.repositoryId) } }
+                DownloadPhase.AVAILABLE -> actions.downloadLabel?.let { label -> RobPrimaryButton(label) { onDownload(selectionId) } }
                 DownloadPhase.CHECKING, DownloadPhase.DOWNLOADING, DownloadPhase.VERIFYING,
                 DownloadPhase.PREPARING_INSTALL -> RobPrimaryButton(stringResource(R.string.cancel_download), onClick = onCancel)
-                DownloadPhase.ERROR, DownloadPhase.SECURITY_ERROR -> if (actions.downloadLabel != null) RobPrimaryButton(stringResource(R.string.retry)) { onDownload(app.repositoryId) }
+                DownloadPhase.ERROR, DownloadPhase.SECURITY_ERROR -> if (actions.downloadLabel != null) RobPrimaryButton(stringResource(R.string.retry)) { onDownload(selectionId) }
                 DownloadPhase.OFFICIAL_VERIFIED -> RobPrimaryButton(stringResource(R.string.continue_install), onClick = onConfirm)
                 DownloadPhase.NO_OFFICIAL_SHA -> RobPrimaryButton(stringResource(R.string.confirm_without_sha), onClick = onConfirm)
                 DownloadPhase.READY, DownloadPhase.UNCONFIRMED, DownloadPhase.INSTALL_ERROR ->
-                    RobPrimaryButton(stringResource(R.string.install_apk)) { onInstall(app.repositoryId) }
+                    RobPrimaryButton(stringResource(R.string.install_apk)) { onInstall(selectionId) }
                 DownloadPhase.PERMISSION_PENDING -> RobPrimaryButton(stringResource(R.string.open_install_settings), onClick = onPermission)
                 else -> Unit
             }

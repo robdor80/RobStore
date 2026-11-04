@@ -18,19 +18,27 @@ object CatalogPolicy {
     const val REQUEST_BUDGET = 50
 }
 
+/** Shared RS-04 artifact contract; membership and channel policy remain destination-specific. */
+interface ReleaseArtifact {
+    val repositoryName: String
+    val packageName: String
+    val release: CatalogRelease
+    val apk: CatalogApk
+}
+
 @Serializable
 data class CatalogApp(
     val repositoryId: Long,
-    val repositoryName: String,
+    override val repositoryName: String,
     val repositoryUrl: String,
     val name: String,
     val description: String,
-    val packageName: String,
-    val release: CatalogRelease,
-    val apk: CatalogApk,
+    override val packageName: String,
+    override val release: CatalogRelease,
+    override val apk: CatalogApk,
     val icon: CatalogIcon?,
     val availability: Availability = Availability.AVAILABLE,
-)
+) : ReleaseArtifact
 
 @Serializable
 enum class Availability { AVAILABLE }

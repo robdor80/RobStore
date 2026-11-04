@@ -28,11 +28,18 @@ class InstallerReturnTest {
             val app = fixtureSnapshot().apps.single().let { it.copy(release = it.release.copy(versionCode = 3)) }
             FileCatalogCache(File(application.filesDir, "catalog")).save(CatalogSnapshot(
                 syncedAt = System.currentTimeMillis(), apps = listOf(app)))
+            // Isolate return handling from the new automatic Release startup check.
+            FileCatalogCache(File(application.filesDir, "self-update")).write("self-update-v1.json",
+                """{"schemaVersion":1,"checkedAt":${System.currentTimeMillis()},"candidate":null}""", 128 * 1024)
             var network = 0; var queries = 0
             CatalogRuntime.transportFactory = { HttpTransport { network++; error("Unexpected network") } }
             var query: InstallationQuery = InstallationQuery.Installed(InstalledApplication(app.packageName, 1, "uno", LauncherQuery.Unavailable))
             val model = ViewModelProvider(store, viewModelFactory { initializer {
-                CatalogViewModel(application, { queries++; query }, dispatcher)
+                CatalogViewModel(application, { packageName ->
+                    if (packageName == application.packageName) InstallationQuery.Installed(
+                        InstalledApplication(packageName, 1, "local", LauncherQuery.Unavailable))
+                    else { assertEquals(app.packageName, packageName); queries++; query }
+                }, dispatcher)
             } })[CatalogViewModel::class.java]
             advanceUntilIdle()
             assertEquals(VersionComparison.PUBLISHED_NEWER, model.installedState.value[app.repositoryId]!!.comparison)
