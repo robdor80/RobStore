@@ -35,3 +35,6 @@ signing.properties
 secrets.properties
 secrets/
 .secrets/
+*.pkcs12
+*.jceks
+**/__pycache__/
