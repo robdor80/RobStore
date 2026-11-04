@@ -43,4 +43,12 @@ class CatalogCacheTest {
         File(directory, "catalog-v1.json.tmp").writeText("interrupted")
         assertEquals(old, FileCatalogCache(directory).load())
     }
+    @Test fun publicationDateOverflowInTamperedCacheIsRejectedWithoutCrash() {
+        val cache = FileCatalogCache(temp.newFolder())
+        val snapshot = fixtureSnapshot()
+        val app = snapshot.apps.single()
+        cache.save(snapshot.copy(apps = listOf(app.copy(release = app.release.copy(publishedAt = "+999999999-12-31T23:59:59Z")))))
+        assertNull(cache.load())
+    }
+
 }

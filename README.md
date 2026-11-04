@@ -3,11 +3,15 @@
 Catálogo Android personal para distribuir aplicaciones propias y públicas en
 GitHub. No utiliza Firebase ni un backend propio.
 
-**Estado: RS-03 — Experiencia visual y catálogo RobStyle (PR Draft para auditoría).**
+**Estado: RS-04 — Descarga e instalación segura de APK (PR Draft para auditoría).**
 Home presenta una malla adaptable con iconos protagonistas y descubre aplicaciones Android públicas de `robdor80` con topic `robstore-app`,
 manifiesto `robstore.json` v1 y una Release estable con el APK exacto declarado.
 Detalle muestra metadatos de esa etiqueta publicada. El catálogo se conserva sin
-conexión; un catálogo vacío real es válido. No hay descarga ni instalación de APK.
+conexión; un catálogo vacío real es válido. La descarga de APK requiere una acción
+explícita, revalida el origen, tamaño, SHA-256 cuando existe y paquete Android.
+La instalación usa el instalador oficial y permiso por origen. Sin SHA oficial
+exige confirmación adicional; abrir el instalador no acredita instalación correcta.
+Consulta [RS-04](docs/RS-04.md) para límites y [cómo descargar RobStore DEV desde Actions](docs/RS-04.md#14-descargar-robstore-dev-desde-actions-en-un-móvil).
 
 ## Stack y requisitos
 
@@ -24,12 +28,12 @@ licencias del SDK e instala `platforms;android-36` y `build-tools;35.0.0`.
 ## Estructura
 
 ```text
-app/src/main/       Manifest, MainActivity, catalog/, ui/ y ui/robstyle/
+app/src/main/       Manifest, MainActivity, catalog/, download/, install/, ui/ y ui/robstyle/
 app/src/debug/      Nombre DEV y recursos del icono DEV
 app/src/test/       Catálogo, HTTP simulado, caché, iconos, identidad y Compose
 gradle/            Catálogo de versiones y Wrapper
 .github/workflows/  Validación Android
-docs/              Contrato RS-02, diseño/validación RS-03 y evidencia RS-00/RS-01
+docs/              Contrato RS-02, RS-03, descarga/instalación RS-04 y evidencias anteriores
 ```
 
 Un único módulo `app`. OkHttp y kotlinx.serialization conectan la API pública sin
@@ -75,7 +79,7 @@ Desde la raíz del repositorio:
 git diff --check
 ```
 
-`test` ejecuta pruebas de ambas variantes mediante Robolectric sobre API 28.
+`test` ejecuta ambas variantes: interfaz en Robolectric API 28 y parser/URI en API 26 y 33.
 Comprueban descubrimiento, manifiestos, Releases/APK, HTTP y cuota, caché/offline,
 refresco, iconos, identidad, launcher, Activity, navegación y estados visuales.
 Los tests usan transporte simulado y no consultan APIs reales. No requieren
@@ -84,15 +88,15 @@ las distribuciones Gradle.
 
 Los APK se generan en `app/build/outputs/apk/`; informes de tests en
 `app/build/reports/tests/` y de lint en `app/build/reports/`.
-La CI ejecuta tests, lint y compilaciones Debug/Release, sin publicación ni firma.
-Validación RS-03: **178 pruebas sin fallos ni omisiones**, lint y compilaciones
-Debug/Release correctos; se conservan los siete avisos de versiones más recientes.
-Once capturas nativas de Robolectric inspeccionadas y pasos para Android real en
-[docs/RS-03.md](docs/RS-03.md).
-La base RS-02 tenía 136 pruebas sin fallos ni omisiones; RS-03 conserva esa
-cobertura y amplía la presentación, adaptabilidad, estados y fechas locales.
+La CI ejecuta tests Debug/Release, lint, ambas compilaciones y verificación de
+identidad, firma Debug, alineación y SHA-256 de los APK reales. Publica evidencias
+y, solo en PR internas correctas, un artefacto instalable `robstore-dev-<SHA>`
+durante 30 días. No publica Releases ni claves privadas. La firma Debug puede
+cambiar entre runners; una DEV anterior puede requerir desinstalarse para instalar
+la nueva, con pérdida de sus datos locales. [Resultados RS-04](docs/evidencias/rs04/resultados.md).
+Se conservan las 198 ejecuciones RS-03, sin omitir pruebas.
 
-## RobStyle y fases siguientes
+## RobStyle y alcance
 
 `ui/robstyle` aplica una paleta azul profundo/cian, tipografía, formas y componentes
 reutilizables sobre Material 3. El tema es oscuro por defecto. Previews incluyen
@@ -109,9 +113,12 @@ Para incorporar otra app: crea un repositorio público de `robdor80`, añade el 
 el APK declarado. El manifiesto se lee desde la etiqueta de la Release. Cada
 actualización usa una nueva etiqueta/Release; no requiere recompilar RobStore.
 
-Fases posteriores incorporarán verificación real de integridad/firma, consulta de
-apps instaladas, descarga, instalación y comparación de versiones. RS-03 no las
-implementa ni afirma que los metadatos de GitHub sean verificación criptográfica.
+RS-04 añade descarga streaming en almacenamiento privado, cancelación real,
+comprobación de archivo/paquete y apertura interactiva del instalador. No consulta
+apps instaladas ni compara sus versiones. Parsear el APK no verifica su firma;
+la decisión final de firma/compatibilidad corresponde a Android. Los metadatos de
+GitHub no garantizan por sí solos autenticidad del editor. Auditoría y pruebas
+físicas pendientes, sin fusión ni publicación de Releases.
 
 Consulta [docs/RS-00.md](docs/RS-00.md) para las decisiones, el entorno Cloud y las
 validaciones de esta entrega.

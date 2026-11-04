@@ -31,6 +31,7 @@ import java.time.Clock
 import kotlinx.coroutines.delay
 import es.robertodorado.robstore.R
 import es.robertodorado.robstore.catalog.*
+import es.robertodorado.robstore.download.*
 import es.robertodorado.robstore.ui.robstyle.*
 
 internal val LocalCatalogClock = staticCompositionLocalOf { Clock.systemDefaultZone() }
@@ -46,7 +47,9 @@ object RobRoutes {
 
 @Composable
 fun RobStoreApp(nav: NavHostController = rememberNavController(), state: CatalogState = CatalogState(loading = false),
-    onRefresh: () -> Unit = {}) {
+    onRefresh: () -> Unit = {}, download: DownloadState = DownloadState(),
+    onDownload: (Long) -> Unit = {}, onCancel: () -> Unit = {}, onConfirm: () -> Unit = {},
+    onInstall: (Long) -> Unit = {}, onPermission: () -> Unit = {}) {
     NavHost(navController = nav, startDestination = RobRoutes.Home) {
         composable(RobRoutes.Home) {
             HomeScreen(onSettings = { nav.navigate(RobRoutes.Settings) { launchSingleTop = true } },
@@ -56,7 +59,9 @@ fun RobStoreApp(nav: NavHostController = rememberNavController(), state: Catalog
         composable(RobRoutes.Settings) { SettingsScreen(onBack = { nav.popBackStack() }, state = state) }
         composable(RobRoutes.AppDetail, arguments = listOf(navArgument("appId") { type = NavType.StringType })) { entry ->
             val id = entry.arguments?.getString("appId")?.toLongOrNull()
-            AppDetailScreen(onBack = { nav.popBackStack() }, app = state.snapshot?.apps?.find { it.repositoryId == id }, state = state)
+            AppDetailScreen(onBack = { nav.popBackStack() }, app = state.snapshot?.apps?.find { it.repositoryId == id }, state = state,
+                download = download, onDownload = onDownload, onCancel = onCancel,
+                onConfirm = onConfirm, onInstall = onInstall, onPermission = onPermission)
         }
     }
 }
@@ -265,12 +270,16 @@ fun SettingsScreen(onBack: () -> Unit, state: CatalogState = CatalogState(loadin
 }
 
 @Composable
-fun AppDetailScreen(onBack: () -> Unit, app: CatalogApp? = null, state: CatalogState = CatalogState(loading = false)) {
+fun AppDetailScreen(onBack: () -> Unit, app: CatalogApp? = null, state: CatalogState = CatalogState(loading = false),
+    download: DownloadState = DownloadState(), onDownload: (Long) -> Unit = {}, onCancel: () -> Unit = {},
+    onConfirm: () -> Unit = {}, onInstall: (Long) -> Unit = {}, onPermission: () -> Unit = {}) {
     Screen(stringResource(R.string.detail), onBack = onBack) {
         if (app == null) {
             Text(stringResource(R.string.app_not_available))
         } else {
-            RobDetailHeader(app)
+            RobDetailHeader(app) {
+                DownloadActions(app, download, onDownload, onCancel, onConfirm, onInstall, onPermission)
+            }
             RobInfoSection(stringResource(R.string.description)) {
                 Text(app.description.ifBlank { stringResource(R.string.no_description) })
             }
@@ -294,18 +303,16 @@ fun AppDetailScreen(onBack: () -> Unit, app: CatalogApp? = null, state: CatalogS
 }
 
 @Composable
-internal fun RobDetailHeader(app: CatalogApp) {
+internal fun RobDetailHeader(app: CatalogApp, actions: @Composable () -> Unit = {
+    DownloadActions(app, DownloadState(), {}, {}, {}, {}, {})
+}) {
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(16.dp)) {
         AppIcon(app, size = RobStyleDimensions.detailIconSize)
         Text(app.name, style = MaterialTheme.typography.headlineLarge)
         Text(stringResource(R.string.version_value, app.release.tag), color = MaterialTheme.colorScheme.primary)
         displayReleaseDate(app.release.publishedAt)?.let { Text(stringResource(R.string.published_value, it),
             style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
-        RobCard {
-            RobPrimaryButton(stringResource(R.string.install_later), enabled = false, onClick = {})
-            Text(stringResource(R.string.available_later), style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
+        actions()
     }
 }
 

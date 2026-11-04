@@ -36,7 +36,7 @@ internal object ManifestValidator {
             if (schemaVersion != 1) throw InvalidMetadata("schemaVersion no compatible")
             if (!safeText(name, 120) || name.isBlank()) throw InvalidMetadata("Nombre incorrecto")
             if (!safeText(description, 4000)) throw InvalidMetadata("Descripción incorrecta")
-            if (packageName.length > 255 || !Regex("[a-zA-Z][a-zA-Z0-9_]*(\\.[a-zA-Z][a-zA-Z0-9_]*)+").matches(packageName)) {
+            if (!safePackageName(packageName)) {
                 throw InvalidMetadata("packageName incorrecto")
             }
             if (!safePath(icon) || !(icon.endsWith(".png") || icon.endsWith(".webp"))) {
