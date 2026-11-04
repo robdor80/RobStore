@@ -1,3 +1,8 @@
+> **Guía histórica opcional.** El requisito vigente es [mobile-first](ANDROID-MOBILE-FIRST.md):
+> no se necesita MSI ni Android Studio. Esta ruta local ya no es el procedimiento oficial.
+> Sus restricciones locales de Actions quedan sustituidas por jobs de firma aislados y
+> entornos protegidos; no mezclar ambos procedimientos de cierre/publicación.
+
 # RS-05 P04 — Guía operativa personal en el MSI
 
 Esta guía permite a ChatGPT orientar al propietario **sin recibir secretos**. No ejecutar

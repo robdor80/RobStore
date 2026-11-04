@@ -1,3 +1,6 @@
+> Evidencias históricas de la entrega local `8524f6d`. La adaptación vigente es
+> [mobile-first](../rs05-p04-mobile/README.md), sin requisito de MSI.
+
 # Evidencias RS-05 P04
 
 Base remota/PR comprobada: `1347de8da4fbd28a009811b93f0322b04676e28a`.

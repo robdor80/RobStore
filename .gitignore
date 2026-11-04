@@ -37,4 +37,5 @@ secrets/
 .secrets/
 *.pkcs12
 *.jceks
+*-signing-backup*.tar.gpg
 **/__pycache__/
