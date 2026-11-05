@@ -144,6 +144,19 @@ def unsigned(args):
     print('Unsigned build prepared without signing secrets')
 
 
+
+def verify_signer_output(signature, certificate):
+    # Android SDK apksigner prints "Signer #1 ..."; Termux's native build prints
+    # "V3.0 Signer: ...". Accept only these explicit formats while preserving
+    # the original single-signer and exact SHA-256 pin requirements.
+    certs = re.findall(
+        r'^(?:Signer #\d+|V\d+(?:\.\d+)? Signer:) certificate SHA-256 digest: ([a-fA-F0-9]{64})$',
+        signature,
+        re.M,
+    )
+    d.require(len(certs) == 1 and certs[0].lower() == d.fingerprint(certificate), 'Unexpected APK signer')
+
+
 def inspect(apk, channel, certificate, settings):
     if settings['robstorePolicy']:
         d.require(settings['repository'] == d.REPO and settings['packages'] == d.PACKAGES,
@@ -151,8 +164,7 @@ def inspect(apk, channel, certificate, settings):
         return d.inspect_apk(apk, channel, certificate)
     tool = d.tools()
     signature = d.run(tool / 'apksigner', 'verify', '--verbose', '--print-certs', apk)
-    certs = re.findall(r'^Signer #\d+ certificate SHA-256 digest: ([a-fA-F0-9]{64})$', signature, re.M)
-    d.require(len(certs) == 1 and certs[0].lower() == d.fingerprint(certificate), 'Unexpected APK signer')
+    verify_signer_output(signature, certificate)
     d.require('Verified using v2 scheme (APK Signature Scheme v2): true' in signature, 'APK v2 signature required')
     d.run(tool / 'zipalign', '-c', '-p', '4', apk)
     badging = d.run(tool / 'aapt', 'dump', 'badging', apk)
