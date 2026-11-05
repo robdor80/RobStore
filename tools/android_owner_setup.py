@@ -212,9 +212,8 @@ def main():
             gh_api(f'repos/{args.repository}/environments/{name}', 'PUT', dict(prevent_self_review=False,
                    reviewers=[dict(type='User', id=owner)], deployment_branch_policy=dict(protected_branches=False, custom_branch_policies=True)))
             gh_api(f'repos/{args.repository}/environments/{name}/deployment-branch-policies', 'POST', dict(name='main', type='branch'))
-        else:
-            from mobile_distribution import protected_environment
-            protected_environment(args.repository, name)
+        from mobile_distribution import protected_environment
+        protected_environment(args.repository, name)
     verify_existing_pins(args.repository, public)
     command(['gh', 'variable', 'set', 'ANDROID_DISTRIBUTION_ENABLED', '--repo', args.repository, '--body', 'false'])
     for channel in ('release', 'dev'):
