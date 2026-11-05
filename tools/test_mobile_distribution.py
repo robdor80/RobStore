@@ -25,6 +25,18 @@ EVENT = dict(repository=dict(full_name=REPO, fork=False, default_branch='main'))
 
 
 class MobilePolicyTests(unittest.TestCase):
+    def test_apksigner_sdk_and_termux_certificate_labels(self):
+        pin = 'c85a092878e85a35b8ca84132bdf00314da3e90dae80fc137ac52a27d11491e7'
+        for label in ('Signer #1', 'V3.0 Signer:', 'V2.0 Signer:'):
+            with self.subTest(label=label):
+                self.assertEqual(d.signer_certificates(f'{label} certificate SHA-256 digest: {pin}'), [pin])
+        for label in ('garbage', 'V3.0 Signer', 'Signer #x'):
+            with self.subTest(label=label):
+                self.assertEqual(d.signer_certificates(f'{label} certificate SHA-256 digest: {pin}'), [])
+        self.assertEqual(d.signer_certificates('V3.0 Signer: certificate SHA-256 digest: ' + pin + '\n'
+            + 'V3.0 Signer: certificate SHA-256 digest: ' + '0' * 64), [pin, '0' * 64])
+        self.assertEqual(d.signer_certificates('V3.0 Signer: certificate SHA-256 digest: ' + 'g' * 64), [])
+
     def test_owner_explicit_dispatch(self):
         with patch.dict(os.environ, ENV):
             m.identity(EVENT, REPO, SOURCE, 'prepare', 'release', 'v0.1.0', '')
