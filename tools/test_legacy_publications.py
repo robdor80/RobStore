@@ -133,6 +133,27 @@ class LegacyTests(unittest.TestCase):
         m.historical_certificate(REPO, 'dev', 'ab'*32)
         with self.assertRaises(ValueError): m.historical_certificate(REPO, 'release', 'ab'*32)
 
+    def test_apksigner_sdk_and_termux_certificate_formats(self):
+        pin = B['certificateSha256']
+        samples = (
+            f'Signer #1 certificate SHA-256 digest: {pin}',
+            f'Number of signers: 1\nV3.0 Signer: certificate SHA-256 digest: {pin}',
+        )
+        for signature in samples:
+            with self.subTest(signature=signature):
+                m.verify_signer_output(signature, pin)
+
+    def test_apksigner_wrong_or_multiple_signers_still_rejected(self):
+        pin = B['certificateSha256']
+        with self.assertRaises(ValueError):
+            m.verify_signer_output(f'V3.0 Signer: certificate SHA-256 digest: {"00"*32}', pin)
+        with self.assertRaises(ValueError):
+            m.verify_signer_output(
+                f'Signer #1 certificate SHA-256 digest: {pin}\n'
+                f'V3.0 Signer: certificate SHA-256 digest: {pin}',
+                pin,
+            )
+
     def test_import_mismatch_stops_before_import_or_generation(self):
         with __import__('tempfile').TemporaryDirectory() as folder:
             source = Path(folder)/'old.jks'; source.write_bytes(b'fixture')
