@@ -13,6 +13,7 @@ from pathlib import Path
 import re
 import subprocess
 import tarfile
+import tempfile
 import uuid
 
 
@@ -75,12 +76,31 @@ def restore_backup(directory, ciphertext, repo):
 
 
 def verify_historical_release(repo, tag):
-    from mobile_distribution import legacy_baselines, verified_legacy, api
+    from mobile_distribution import legacy_baselines, legacy_metadata, download_legacy_asset, api
     approved = [b for b in legacy_baselines(repo) if b['tag'] == tag]
     require(len(approved) == 1, 'An explicit reviewed historical publication is required')
     b = approved[0]
-    verified_legacy(repo, api(f'repos/{repo}/releases/tags/{tag}'), b)
+    release = api(f'repos/{repo}/releases/tags/{tag}')
+    require(legacy_metadata(repo, release, b) is None, 'Historical import requires the approved legacy APK evidence')
+    # Termux's maintained apksigner package ships this Java SDK verifier. No ARM aapt,
+    # zipalign, SDK directory shim or permissive native-output parser is needed here.
+    jar = Path(os.environ['PREFIX']) / 'share/java/apksigner.jar'
+    require(jar.is_file(), 'Install the maintained Termux apksigner package (Java verifier)')
+    with tempfile.TemporaryDirectory(prefix='owner-public-apk-') as folder:
+        apk = download_legacy_asset(repo, release, b, folder)
+        signature = command(['java', '-jar', jar, 'verify', '--verbose', '--print-certs', apk]).decode()
+        certs = re.findall(r'^Signer #\d+ certificate SHA-256 digest: ([a-fA-F0-9]{64})$', signature, re.M)
+        require(len(certs) == 1 and certs[0].lower() == b['certificateSha256'] and
+                'Verified using v2 scheme (APK Signature Scheme v2): true' in signature,
+                'Official historical APK certificate/v2 signature mismatch')
     return b['certificateSha256']
+
+
+def require_private_entry(store, channel, password):
+    environment = dict(os.environ, ANDROID_OWNER_KEY_PASSWORD=password)
+    entry = command(['keytool', '-J-Duser.language=en', '-list', '-v', '-keystore', store,
+                     '-alias', 'android-' + channel, '-storepass:env', 'ANDROID_OWNER_KEY_PASSWORD'], environment=environment)
+    require(b'Entry type: PrivateKeyEntry' in entry, 'A private signing entry is required')
 
 
 def import_release(source, destination, password, expected):
@@ -158,10 +178,12 @@ def main():
     require(command(['git', 'rev-parse', 'HEAD']).decode().strip() == args.tooling_sha and
             not command(['git', 'status', '--porcelain', '--untracked-files=all']).strip(),
             'Run the clean central checkout at exactly the approved tooling SHA')
-    require(not directory.is_relative_to(checkout) and directory.is_relative_to(Path.home()), 'Use private Termux home outside Git/shared storage')
+    require(not directory.is_relative_to(checkout) and directory.is_relative_to(Path.home()) and
+            not any((parent / '.git').exists() for parent in directory.parents), 'Use private Termux home outside any Git/shared storage')
     if args.import_release_keystore:
         imported_source = Path(args.import_release_keystore).expanduser().resolve()
-        require(imported_source.is_relative_to(Path.home()) and not imported_source.is_relative_to(checkout),
+        require(imported_source.is_relative_to(Path.home()) and not imported_source.is_relative_to(checkout) and
+                not any((parent / '.git').exists() for parent in imported_source.parents),
                 'Recover historical keystore into private Termux home outside Git/shared storage')
     if args.restore_backup:
         restore_backup(directory, Path(args.restore_backup).expanduser().resolve(), args.repository)
@@ -191,6 +213,7 @@ def main():
                      '-validity', '10000', '-dname', 'CN=' + args.repository.replace('/', '-') + '-' + channel,
                      '-storepass:env', 'ANDROID_OWNER_KEY_PASSWORD'], environment=environment)
         store.chmod(0o600)
+        require_private_entry(store, channel, password)
         cert = command(['keytool', '-exportcert', '-keystore', store, '-alias', 'android-' + channel,
                         '-storepass:env', 'ANDROID_OWNER_KEY_PASSWORD'], environment=environment)
         pin = hashlib.sha256(cert).hexdigest()
@@ -209,9 +232,8 @@ def main():
             gh_api(f'repos/{args.repository}/environments/{name}', 'PUT', dict(prevent_self_review=False,
                    reviewers=[dict(type='User', id=owner)], deployment_branch_policy=dict(protected_branches=False, custom_branch_policies=True)))
             gh_api(f'repos/{args.repository}/environments/{name}/deployment-branch-policies', 'POST', dict(name='main', type='branch'))
-        else:
-            from mobile_distribution import protected_environment
-            protected_environment(args.repository, name)
+        from mobile_distribution import protected_environment
+        protected_environment(args.repository, name)
     check_existing_identities(args.repository, public)
     command(['gh', 'variable', 'set', 'ANDROID_DISTRIBUTION_ENABLED', '--repo', args.repository, '--body', 'false'])
     for channel in ('release', 'dev'):
