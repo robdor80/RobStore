@@ -47,6 +47,79 @@ def raw_file(repo, ref, path):
     return api(f'repos/{repo}/contents/{path}?ref={quote(ref, safe="")}', raw=True)
 
 
+def legacy_baselines(repo):
+    """Central, immutable tooling approval; never read an exception from app code."""
+    data = json.loads(Path(__file__).with_name('legacy-publications.json').read_text(encoding='utf-8'))
+    d.require(data['schemaVersion'] == 1, 'Invalid legacy baseline schema')
+    entries = data['publications']
+    d.require(len({(b['repository'], b['tag']) for b in entries}) == len(entries), 'Duplicate legacy baseline')
+    for b in entries:
+        d.require(re.fullmatch(r'robdor80/[A-Za-z0-9_.-]+', b['repository']) and
+                  b['tag'] == 'v' + b['versionName'] and re.fullmatch(r'v[0-9]+\.[0-9]+\.[0-9]+', b['tag']) and
+                  re.fullmatch('[0-9a-f]{40}', b['tagCommit']), 'Invalid legacy identity')
+        for key in ('releaseId', 'assetId', 'assetSize', 'versionCode', 'minSdk', 'targetSdk'):
+            d.require(type(b[key]) is int and b[key] > 0, 'Invalid legacy numeric metadata')
+        d.fingerprint(b['sha256'])
+        d.fingerprint(b['certificateSha256'])
+        d.require(re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._-]*\.apk', b['apkAssetName']), 'Unsafe legacy asset')
+    return [b for b in entries if b['repository'] == repo]
+
+
+def legacy_settings(b):
+    return dict(repository=b['repository'], packages=dict(release=b['packageName'], dev=b['packageName'] + '.debug'),
+                minSdk=b['minSdk'], targetSdk=b['targetSdk'], robstorePolicy=False)
+
+
+def verified_legacy_release(b):
+    """Bind a published stable Release and GitHub's mandatory digest to a reviewed commit."""
+    repo, tag = b['repository'], b['tag']
+    release = api(f'repos/{repo}/releases/tags/{tag}')
+    d.require(release['id'] == b['releaseId'] and release['tag_name'] == tag and
+              release['draft'] is False and release['prerelease'] is False and release.get('published_at') and
+              release['html_url'] == f'https://github.com/{repo}/releases/tag/{tag}', 'Legacy Release identity mismatch')
+    ref = api(f'repos/{repo}/git/ref/tags/{tag}')
+    d.require(ref['ref'] == 'refs/tags/' + tag and ref['object'] == dict(
+        sha=b['tagCommit'], type='commit', url=f'https://api.github.com/repos/{repo}/git/commits/{b["tagCommit"]}'),
+        'Legacy tag moved or changed; owner review required')
+    # Listing succeeds or the whole operation fails. No catch-all API/404 fallback.
+    files = api(f'repos/{repo}/contents/?ref={b["tagCommit"]}')
+    d.require(isinstance(files, list) and not any(f['name'] == d.CONTRACT for f in files),
+              'Approved legacy commit must lack the modern contract')
+    manifest = json.loads(raw_file(repo, b['tagCommit'], 'robstore.json'))
+    d.require(manifest['schemaVersion'] == 1 and manifest['packageName'] == b['packageName'] and
+              manifest['apkAssetName'] == b['apkAssetName'] and
+              manifest.get('versionCode', b['versionCode']) == b['versionCode'] and
+              manifest.get('versionName', b['versionName']) == b['versionName'], 'Legacy catalog metadata mismatch')
+    assets = [a for a in release['assets'] if a['name'] == b['apkAssetName']]
+    d.require(len(assets) == 1, 'Legacy APK asset missing or ambiguous')
+    asset = assets[0]
+    d.require(asset['id'] == b['assetId'] and asset['state'] == 'uploaded' and asset['size'] == b['assetSize'] and
+              asset.get('digest') == 'sha256:' + b['sha256'], 'Legacy APK asset/digest mismatch')
+    return release
+
+
+def download_historical_apk(b, directory):
+    """Read-only official asset download, with mandatory GitHub and local SHA-256."""
+    verified_legacy_release(b)
+    apk = Path(directory) / b['apkAssetName']
+    with apk.open('xb') as output:
+        result = subprocess.run(['gh', 'api', '-H', 'Accept: application/octet-stream',
+            f'repos/{b["repository"]}/releases/assets/{b["assetId"]}'], stdout=output, stderr=subprocess.PIPE)
+    d.require(result.returncode == 0 and apk.stat().st_size == b['assetSize'] and d.digest(apk) == b['sha256'],
+              'Historical APK download/hash mismatch')
+    return apk
+
+
+def historical_apk(b, directory):
+    """Verify bytes AND real signed APK metadata in the isolated distribution runner."""
+    apk = download_historical_apk(b, directory)
+    actual = inspect(apk, 'release', b['certificateSha256'], legacy_settings(b))
+    expected = dict(schemaVersion=1, channel='release', **{k: b[k] for k in
+        ('packageName', 'versionCode', 'versionName', 'apkAssetName', 'sha256')})
+    d.validate_contract(actual, expected)
+    return actual
+
+
 def config(data, repo):
     d.require(type(data['schemaVersion']) is int and data['schemaVersion'] == 1 and data['repository'] == repo, 'Configuration repository mismatch')
     d.require(re.fullmatch(r'robdor80/[A-Za-z0-9_.-]+', repo), 'Only owner personal repositories are allowed')
@@ -63,6 +136,9 @@ def config(data, repo):
     d.require(isinstance(data['name'], str) and data['name'].strip() and len(data['name']) <= 120 and
               isinstance(data['description'], str) and len(data['description']) <= 4000 and
               all(not (ord(c) < 32 or 127 <= ord(c) <= 159) or c in '\n\r\t' for c in data['name'] + data['description']), 'Invalid catalog text')
+    for b in legacy_baselines(repo):
+        d.require(data['packages']['release'] == b['packageName'] and data['minSdk'] == b['minSdk'] and
+                  data['targetSdk'] == b['targetSdk'], 'Historical application identity must be preserved')
     return data
 
 
@@ -145,6 +221,9 @@ def unsigned(args):
 
 
 def inspect(apk, channel, certificate, settings):
+    for b in legacy_baselines(settings['repository']):
+        if channel == 'release':
+            d.require(d.fingerprint(certificate) == b['certificateSha256'], 'Historical Release certificate must be preserved')
     if settings['robstorePolicy']:
         d.require(settings['repository'] == d.REPO and settings['packages'] == d.PACKAGES,
                   'RobStore verification policy cannot be repurposed')
@@ -171,14 +250,26 @@ def inspect(apk, channel, certificate, settings):
 
 
 def increasing(repo, contract):
+    baselines = {b['tag']: b for b in legacy_baselines(repo)}
+    seen = set()
     for release in pages(f'repos/{repo}/releases'):
         if release['draft'] or release['prerelease'] != (contract['channel'] == 'dev'):
             continue
-        previous = json.loads(raw_file(repo, 'refs/tags/' + release['tag_name'], d.CONTRACT))
+        b = baselines.get(release['tag_name'])
+        if b is not None:
+            d.require(release['id'] == b['releaseId'], 'Legacy listing identity mismatch')
+            with tempfile.TemporaryDirectory(prefix='legacy-public-apk-') as directory:
+                previous = historical_apk(b, directory)
+            seen.add(b['tag'])
+            print('Verified approved legacy baseline: ' + repo + ' ' + b['tag'])
+        else:
+            previous = json.loads(raw_file(repo, 'refs/tags/' + release['tag_name'], d.CONTRACT))
         d.increasing(contract, previous)
         assets = [a for a in release['assets'] if a['name'] == previous['apkAssetName']]
         d.require(len(assets) == 1 and assets[0]['state'] == 'uploaded' and
                   assets[0].get('digest') in (None, 'sha256:' + previous['sha256']), 'Previous official asset inconsistent')
+    if contract['channel'] == 'release':
+        d.require(seen == set(baselines), 'Approved historical Release missing from stable publications')
 
 
 def expected_tag(contract):

@@ -276,6 +276,33 @@ class MobileSignedTests(unittest.TestCase):
         with patch.dict(os.environ, self.env), self.assertRaises(ValueError):
             m.candidate(self.args, self.settings)
 
+    def test_import_existing_private_key_preserves_real_certificate(self):
+        # Reuse the ephemeral fixture; never generate/import an owner Release identity.
+        destination = self.root / 'imported-release.p12'
+        source = self.fixture.directory / 'fixture-1.p12'
+        password = self.fixture.env['ROBSTORE_TEST_PASSWORD']
+        with patch.object(Path, 'home', return_value=source.parent.parent), \
+                patch('builtins.input', side_effect=[str(source), 'fixture']), \
+                patch.object(owner_setup.getpass, 'getpass', return_value=password):
+            owner_setup.import_release(destination, password, self.root / 'checkout')
+        self.assertEqual(owner_setup.certificate_pin(destination, 'release', password), self.fixture.certificates[0])
+
+    def test_import_jks_with_separate_passwords_preserves_certificate(self):
+        source = self.root / 'historical.jks'
+        destination = self.root / 'normalized-release.p12'
+        password = self.fixture.env['ROBSTORE_TEST_PASSWORD']
+        key_password = secrets.token_urlsafe(32)
+        environment = dict(os.environ, FIXTURE_STORE_PASSWORD=password, FIXTURE_KEY_PASSWORD=key_password)
+        owner_setup.command(['keytool', '-importkeystore', '-noprompt', '-srckeystore', self.fixture.directory / 'fixture-1.p12',
+            '-srcalias', 'fixture', '-srcstorepass:env', 'FIXTURE_STORE_PASSWORD',
+            '-destkeystore', source, '-deststoretype', 'JKS', '-destalias', 'historical-alias',
+            '-deststorepass:env', 'FIXTURE_STORE_PASSWORD', '-destkeypass:env', 'FIXTURE_KEY_PASSWORD'], environment=environment)
+        with patch.object(Path, 'home', return_value=source.parent.parent), \
+                patch('builtins.input', side_effect=[str(source), 'historical-alias']), \
+                patch.object(owner_setup.getpass, 'getpass', side_effect=[password, key_password]):
+            owner_setup.import_release(destination, password, self.root / 'checkout')
+        self.assertEqual(owner_setup.certificate_pin(destination, 'release', password), self.fixture.certificates[0])
+
     def test_generic_application_policy(self):
         self.sign()
         settings = dict(self.settings, repository='robdor80/FixtureApp', robstorePolicy=False)

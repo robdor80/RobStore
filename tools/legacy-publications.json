@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "publications": [
+    {
+      "repository": "robdor80/Cuadrante_App",
+      "tag": "v1.0.0",
+      "tagCommit": "8513721961fd980347bf63c7bc3ab6470cf1d329",
+      "releaseId": 433418870,
+      "assetId": 707829735,
+      "assetSize": 9868158,
+      "packageName": "es.robertodorado.cuadrante",
+      "versionCode": 1,
+      "versionName": "1.0.0",
+      "apkAssetName": "cuadrante-v1.0.0.apk",
+      "sha256": "e514c058212eb1bd11f9747488f82ca22b904de40ce46a250ea93ebe462e362a",
+      "certificateSha256": "c85a092878e85a35b8ca84132bdf00314da3e90dae80fc137ac52a27d11491e7",
+      "minSdk": 26,
+      "targetSdk": 36
+    }
+  ]
+}

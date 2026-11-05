@@ -139,8 +139,10 @@ Si falla una operación de red tras crear las identidades, conservar el director
 huellas y protecciones existentes antes de reponer secretos; no se sustituyen identidades
 con huellas diferentes. Si se interrumpe la generación antes de completar el registro,
 detenerse y revisar el material ya creado; no borrar/recrear una clave ya distribuida.
-El asistente es para alta/recuperación de estas identidades, no para importar a ciegas
-keystores históricos de otra aplicación o de alias diferentes.
+Para una Release histórica aprobada se debe usar el modo explícito `--import-release`,
+que nunca genera una nueva clave Release y verifica el APK oficial y el certificado antes
+de habilitar distribución. Véase [transición de Cuadrante](RS-05-CUADRANTE-LEGACY.md).
+El alta normal queda bloqueada para Cuadrante; no importar keystores sin una baseline auditada.
 
 Si se pierde o sustituye el móvil: instalar Termux/herramientas, recuperar personalmente
 cuentas y gestor, descargar el `.tar.gpg` de Drive y restaurar en un directorio nuevo:
