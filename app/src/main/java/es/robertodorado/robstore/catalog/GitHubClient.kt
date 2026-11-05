@@ -23,6 +23,17 @@ internal class GitHubClient(
             .addQueryParameter("type", "owner").build())
         fun releases(repository: String): List<JsonObject> = pages(apiUrl("repos/${CatalogPolicy.OWNER}/$repository/releases"))
         fun assets(repository: String, releaseId: Long): List<JsonObject> = pages(apiUrl("repos/${CatalogPolicy.OWNER}/$repository/releases/$releaseId/assets"))
+        fun repository(repository: String): JsonObject {
+            val bytes = request(apiUrl("repos/${CatalogPolicy.OWNER}/$repository"), CatalogPolicy.MAX_RESPONSE_BYTES)!!
+            try {
+                val text = bytes.decodeToString(throwOnInvalidSequence = true)
+                if (!boundedJsonNesting(text)) throw InvalidMetadata("JSON incorrecto")
+                return catalogJson.parseToJsonElement(text) as? JsonObject ?: throw InvalidMetadata("Repositorio incorrecto")
+            } catch (_: IllegalArgumentException) { throw InvalidMetadata("Repositorio JSON incorrecto") }
+            catch (_: CharacterCodingException) { throw InvalidMetadata("Repositorio UTF-8 incorrecto") }
+        }
+        fun updateManifest(tag: String): ByteArray? = request(
+            contentUrl("RobStore", "refs/tags/$tag", "robstore-update.json"), CatalogPolicy.MAX_MANIFEST_BYTES, raw = true, missingAllowed = true)
         fun manifest(repository: String, tag: String): ByteArray? = try {
             request(contentUrl(repository, tag, "robstore.json"), CatalogPolicy.MAX_MANIFEST_BYTES, raw = true, missingAllowed = true)
         } catch (_: ResourceTooLarge) { throw InvalidMetadata("Manifiesto demasiado grande") }

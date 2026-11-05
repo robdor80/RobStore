@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Verify Android output identities, SDK, alignment and signing; package only the real DEV APK."""
+import argparse
 import hashlib
 import os
 import re
@@ -16,6 +17,10 @@ def run(*args, success=True):
 
 
 def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--unsigned-debug', action='store_true',
+                        help='Validate unsigned Debug output without creating or using private keys')
+    unsigned_debug = parser.parse_args().unsigned_debug
     sdk = Path(os.environ.get('ANDROID_HOME') or os.environ['ANDROID_SDK_ROOT'])
     tools = sdk / 'build-tools/35.0.0'
     commit = run('git', 'rev-parse', 'HEAD').stdout.strip()
@@ -26,7 +31,7 @@ def main():
     report = [f'# Verificación de APK — {commit}', '']
     for variant, package, label in [('debug', 'es.robertodorado.robstore.debug', 'RobStore DEV'),
                                      ('release', 'es.robertodorado.robstore', 'RobStore')]:
-        apk = Path(f'app/build/outputs/apk/{variant}/app-{variant}' + ('-unsigned.apk' if variant == 'release' else '.apk'))
+        apk = Path(f'app/build/outputs/apk/{variant}/app-{variant}' + ('-unsigned.apk' if variant == 'release' or unsigned_debug else '.apk'))
         badging = run(tools / 'aapt', 'dump', 'badging', apk).stdout
         assert f"package: name='{package}'" in badging, 'Unexpected package'
         assert f"application-label:'{label}'" in badging, 'Unexpected label'
@@ -34,6 +39,7 @@ def main():
         assert 'android.permission.REQUEST_INSTALL_PACKAGES' in badging
         assert 'android.permission.WRITE_EXTERNAL_STORAGE' not in badging
         assert 'android.permission.MANAGE_EXTERNAL_STORAGE' not in badging
+        assert 'android.permission.QUERY_ALL_PACKAGES' not in badging
         manifest = run(tools / 'aapt', 'dump', 'xmltree', apk, 'AndroidManifest.xml').stdout
         provider = next(block for block in manifest.split('E: provider') if 'androidx.core.content.FileProvider' in block)
         provider = provider.split('E: activity', 1)[0]
@@ -47,14 +53,14 @@ def main():
         assert 'path="apk-downloads/verified/"' in paths
         run(tools / 'zipalign', '-c', '-p', '4', apk)
         signature = run(tools / 'apksigner', 'verify', '--verbose', '--print-certs', apk, success=False)
-        assert (signature.returncode == 0) == (variant == 'debug'), 'Unexpected signing state'
+        assert (signature.returncode == 0) == (variant == 'debug' and not unsigned_debug), 'Unexpected signing state'
         with apk.open('rb') as stream:
             digest = hashlib.file_digest(stream, 'sha256').hexdigest()
         report += [f'## {variant}', '', f'- Paquete: `{package}`; nombre: {label}.',
                    '- SDK 26/36, FileProvider limitado/no exportado y zipalign: PASS.',
-                   '- Firma Debug válida: PASS.' if variant == 'debug' else '- Release sin firma privada: confirmado.',
+                   '- Firma Debug válida: PASS.' if variant == 'debug' and not unsigned_debug else '- APK sin firma privada: confirmado.',
                    f'- SHA-256: `{digest}`.', '']
-        if variant == 'debug':
+        if variant == 'debug' and not unsigned_debug:
             name = f'RobStore-DEV-{commit[:12]}.apk'
             shutil.copyfile(apk, output / name)
             (output / 'SHA256SUMS').write_text(f'{digest}  {name}\n')

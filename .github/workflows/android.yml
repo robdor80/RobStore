@@ -15,14 +15,20 @@ jobs:
   validate:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
+    env:
+      # Only an internal PR in RobStore may create the temporary Android Debug key.
+      TRUSTED_INTERNAL_PR: ${{ github.event_name == 'pull_request' && github.repository == 'robdor80/RobStore' && github.event.pull_request.head.repo.full_name == github.repository }}
     steps:
       - uses: actions/checkout@v7.0.1
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
       - uses: actions/setup-java@v6.1.0
         with:
           distribution: temurin
-          java-version: '17'
+          java-version: |
+            21
+            17
       - uses: android-actions/setup-android@v4.0.4
         with:
           cmdline-tools-version: '13114758'
@@ -34,14 +40,31 @@ jobs:
       - name: Enable Gradle Wrapper
         run: chmod +x gradlew
       - name: Test, lint and compile
-        run: ./gradlew test lint assembleDebug assembleRelease --no-daemon
+        run: |
+          init_args=(-I tools/unsigned-validation.gradle)
+          if [[ "$TRUSTED_INTERNAL_PR" == 'true' ]]; then
+            init_args=()
+          fi
+          ./gradlew "${init_args[@]}" test lint lintRelease assembleDebug assembleRelease --no-daemon
       - name: Check whitespace
         run: |
           git diff --check
           python3 tools/check_rs04_regressions.py
+          python3 tools/check_rs05_regressions.py
           test -z "$(git ls-files '*.apk' '*.aab' '*.jks' '*.keystore' '*.key')"
+      - name: Validate distribution tooling without production keys
+        run: |
+          python3 -m unittest discover -s tools -p test_distribution.py -v
+          python3 -m unittest discover -s tools -p test_distribution_signed.py -v
+          python3 -m unittest discover -s tools -p test_mobile_distribution.py -v
+          python3 tools/check_distribution_secrets.py
       - name: Verify APK identity, alignment, signature and SHA-256
-        run: python3 tools/verify_rs04_apks.py
+        run: |
+          verify_args=(--unsigned-debug)
+          if [[ "$TRUSTED_INTERNAL_PR" == 'true' ]]; then
+            verify_args=()
+          fi
+          python3 tools/verify_rs04_apks.py "${verify_args[@]}"
       - name: Summarize audit evidence
         if: always()
         run: |
@@ -63,10 +86,14 @@ jobs:
             app/build/rs04-evidence/
             app/build/rs04-dev/verificacion.md
       - name: Upload installable RobStore DEV APK (trusted internal PR only)
-        if: success() && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+        if: success() && env.TRUSTED_INTERNAL_PR == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: robstore-dev-${{ github.event.pull_request.head.sha }}
           retention-days: 30
           if-no-files-found: error
-          path: app/build/rs04-dev/
+          path: |
+            app/build/rs04-dev/RobStore-DEV-*.apk
+            app/build/rs04-dev/SHA256SUMS
+            app/build/rs04-dev/firma-debug.txt
+            app/build/rs04-dev/verificacion.md

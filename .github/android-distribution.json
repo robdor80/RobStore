@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "repository": "robdor80/RobStore",
+  "name": "RobStore",
+  "description": "Catálogo personal de aplicaciones Android de Roberto Dorado.",
+  "packages": {
+    "release": "es.robertodorado.robstore",
+    "dev": "es.robertodorado.robstore.debug"
+  },
+  "module": "app",
+  "minSdk": 26,
+  "targetSdk": 36,
+  "robstorePolicy": true,
+  "iconSource": "app/src/main/res/mipmap-xxxhdpi/ic_launcher.png",
+  "notesPath": ".github/release-notes.md"
+}

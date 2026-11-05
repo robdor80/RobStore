@@ -14,6 +14,8 @@ internal data class AppManifest(
     val packageName: String,
     val icon: String = "robstore/icon.png",
     val apkAssetName: String,
+    val versionCode: Long? = null,
+    val versionName: String? = null,
 )
 
 internal object ManifestValidator {
@@ -25,6 +27,17 @@ internal object ManifestValidator {
             val root = catalogJson.parseToJsonElement(text)
             if ((root as? JsonObject)?.get("schemaVersion") != JsonPrimitive(1)) {
                 throw InvalidMetadata("schemaVersion no compatible o de tipo incorrecto")
+            }
+            val fields = root.jsonObject
+            fields["versionCode"]?.let { value ->
+                val number = value as? JsonPrimitive
+                if (number == null || number.isString || !Regex("[1-9][0-9]*").matches(number.content) ||
+                    number.longOrNull?.let { it > 0 } != true) throw InvalidMetadata("versionCode incorrecto")
+            }
+            fields["versionName"]?.let { value ->
+                if (value !is JsonPrimitive || !value.isString || !safeVersionName(value.content)) {
+                    throw InvalidMetadata("versionName incorrecto")
+                }
             }
             catalogJson.decodeFromJsonElement<AppManifest>(root)
         } catch (_: SerializationException) {
@@ -90,3 +103,6 @@ internal fun boundedJsonNesting(text: String): Boolean {
     }
     return depth == 0 && !quoted
 }
+
+internal fun safeVersionName(value: String): Boolean =
+    value.isNotBlank() && value.length <= 120 && value.none { it.isISOControl() }

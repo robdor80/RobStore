@@ -22,6 +22,8 @@ internal object CatalogValidation {
             app.name.isNotBlank() && safeText(app.name, 120) && safeText(app.description, 4000) &&
             safePackageName(app.packageName) && app.release.id > 0 && safeTag(app.release.tag) &&
             publishedInstant(app.release.publishedAt).toEpochMilli() > 0 && safeText(app.release.notes, 32 * 1024) &&
+            (app.release.versionCode == null || app.release.versionCode > 0) &&
+            (app.release.versionName == null || safeVersionName(app.release.versionName)) &&
             apk(app.repositoryName, app.release.tag, app.apk) &&
             (app.icon == null || (app.icon.repository == app.repositoryName && app.icon.releaseId == app.release.id &&
                 app.icon.tag == app.release.tag && safePath(app.icon.path)))

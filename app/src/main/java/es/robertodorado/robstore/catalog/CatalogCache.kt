@@ -31,12 +31,12 @@ class FileCatalogCache(private val directory: File) : CatalogCache {
         write("refresh-v1.json", catalogJson.encodeToString(gate), 1024)
     }
 
-    private fun <T> read(name: String, limit: Int, decode: (String) -> T?): T? = try {
+    @Synchronized internal fun <T> read(name: String, limit: Int, decode: (String) -> T?): T? = try {
         val file = File(directory, name)
         if (!file.isFile || file.length() > limit) null else decode(file.readText(Charsets.UTF_8))
     } catch (_: java.io.IOException) { null } catch (_: IllegalArgumentException) { null }
 
-    private fun write(name: String, text: String, limit: Int) {
+    @Synchronized internal fun write(name: String, text: String, limit: Int) {
         val bytes = text.toByteArray(Charsets.UTF_8)
         if (bytes.size > limit) throw java.io.IOException("Caché demasiado grande")
         if (!directory.isDirectory && !directory.mkdirs()) throw java.io.IOException("No se pudo crear la caché")

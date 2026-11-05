@@ -78,7 +78,7 @@ internal class CatalogDiscovery(private val client: GitHubClient, private val no
         val notes = when (release["body"]) { null, JsonNull -> ""; else -> release.string("body") }
         if (!safeText(notes, 32 * 1024)) throw InvalidMetadata("Notas de Release incorrectas o demasiado largas")
         return CatalogApp(id, name, url, manifest.name, manifest.description, manifest.packageName,
-            CatalogRelease(releaseId, tag, publishedAt, notes), CatalogApk(assetId, manifest.apkAssetName, size, downloadUrl, digest),
+            CatalogRelease(releaseId, tag, publishedAt, notes, manifest.versionCode, manifest.versionName), CatalogApk(assetId, manifest.apkAssetName, size, downloadUrl, digest),
             CatalogIcon(name, releaseId, tag, manifest.icon))
     }
 }

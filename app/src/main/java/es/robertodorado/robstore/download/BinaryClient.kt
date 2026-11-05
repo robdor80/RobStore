@@ -56,8 +56,8 @@ internal class BinaryClient(client: OkHttpClient = OkHttpClient()) {
         .connectTimeout(15, TimeUnit.SECONDS).readTimeout(30, TimeUnit.SECONDS)
         .callTimeout(5, TimeUnit.MINUTES).build()
 
-    fun open(app: CatalogApp, cancellation: DownloadCancellation): BinaryResponse {
-        if (!CatalogValidation.app(app)) throw DownloadSecurity("Metadatos del APK inválidos.")
+    fun open(app: ReleaseArtifact, cancellation: DownloadCancellation): BinaryResponse {
+        if (!validArtifact(app)) throw DownloadSecurity("Metadatos del APK inválidos.")
         var url = app.apk.downloadUrl.toHttpUrlOrNull()!!
         val seen = mutableSetOf<String>()
         var redirects = 0

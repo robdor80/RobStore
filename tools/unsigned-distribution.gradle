@@ -1,0 +1,9 @@
+// Shared CI build phase: no keystore and no production credentials in Gradle.
+allprojects {
+    plugins.withId('com.android.application') {
+        android.buildTypes.configureEach {
+            signingConfig = null
+            if (name == 'debug') { debuggable = false }
+        }
+    }
+}

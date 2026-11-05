@@ -31,6 +31,9 @@ class MainActivity : ComponentActivity() {
                 val model: CatalogViewModel = viewModel()
                 val state by model.state.collectAsStateWithLifecycle()
                 val download by model.downloadState.collectAsStateWithLifecycle()
+                val installed by model.installedState.collectAsStateWithLifecycle()
+                val selfUpdate by model.selfUpdateState.collectAsStateWithLifecycle()
+                val openMessage by model.openMessage.collectAsStateWithLifecycle()
                 val installer = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {
                     // ACTION_VIEW results are not reliable proof of installation or cancellation.
                     model.installerReturned()
@@ -38,9 +41,16 @@ class MainActivity : ComponentActivity() {
                 val settings = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {
                     model.permissionReturned()
                 }
-                LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { model.permissionReturned() }
+                LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
+                    model.permissionReturned()
+                    model.refreshInstalled()
+                }
                 CompositionLocalProvider(LocalCatalogIcons provides model.icons) {
-                    RobStoreApp(state = state, onRefresh = model::refresh, download = download,
+                    RobStoreApp(selfUpdate = selfUpdate, onCheckSelfUpdate = model::checkSelfUpdate,
+                        onDownloadSelfUpdate = model::downloadSelfUpdate,
+                        onInstallSelfUpdate = { model.installSelfUpdate { launchSystemActivity(it, { intent -> installer.launch(intent) }, model::installationError) } },
+                        state = state, onRefresh = model::refresh, download = download,
+                        installed = installed, openMessage = openMessage, onOpen = { id -> model.open(id, ::startActivity) },
                         onDownload = model::download, onCancel = model::cancelDownload,
                         onConfirm = model::confirmPrepared,
                         onInstall = { id -> model.install(id) { launchSystemActivity(it, { intent -> installer.launch(intent) }, model::installationError) } },

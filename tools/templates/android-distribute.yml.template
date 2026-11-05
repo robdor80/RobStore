@@ -1,0 +1,45 @@
+name: Android distribution (owner manual)
+on:
+  workflow_dispatch:
+    inputs:
+      operation:
+        description: 'prepare = firmar candidato; publish = publicar candidato previamente revisado'
+        type: choice
+        options: [prepare, publish]
+        default: prepare
+      source_sha:
+        description: 'Opcional: SHA completo aprobado. Vacío usa el commit de main seleccionado.'
+      channel:
+        type: choice
+        description: Canal
+        options: [release, dev]
+        default: release
+      tag:
+        description: 'vX.Y.Z o dev-X.Y.Z-DEV-N'
+        required: true
+      candidate_run:
+        description: 'Sólo publish: ID del run prepare completado'
+      expected_sha256:
+        description: 'Sólo publish: SHA-256 exacto del APK revisado'
+      confirmation:
+        description: 'Sólo publish: PUBLICAR seguido de un espacio y la etiqueta exacta'
+permissions:
+  contents: read
+  actions: read
+  deployments: read
+jobs:
+  distribute:
+    uses: robdor80/RobStore/.github/workflows/android-distribution-engine.yml@REPLACE_WITH_AUDITED_COMMIT_SHA
+    permissions:
+      contents: write
+      actions: read
+      deployments: read
+    with:
+      operation: ${{ inputs.operation }}
+      source_sha: ${{ inputs.source_sha || github.sha }}
+      channel: ${{ inputs.channel }}
+      tag: ${{ inputs.tag }}
+      candidate_run: ${{ inputs.candidate_run }}
+      expected_sha256: ${{ inputs.expected_sha256 }}
+      confirmation: ${{ inputs.confirmation }}
+      tooling_sha: ${{ vars.ANDROID_DISTRIBUTION_TOOLING_SHA }}

@@ -21,6 +21,22 @@ class ApkVerifierTest {
         val partial = files.partial().also { it.writeBytes(bytes) }
         return PreparedApk.verify(partial, app, files, inspector, token, TEST_NOW) to files
     }
+    @Test fun declaredVersionCodeMustMatchArchiveAndMismatchDeletesPartial() {
+        for (code in listOf(1L, 2L)) {
+            val files = DownloadFiles(temp.newFolder())
+            val partial = files.partial().also { it.writeBytes(APK_BYTES) }
+            val app = preparedApp().let { it.copy(release = it.release.copy(versionCode = code)) }
+            if (code == 1L) {
+                assertEquals(1L, PreparedApk.verify(partial, app, files, fakeInspector(), DownloadCancellation(), TEST_NOW).metadata.versionCode)
+            } else {
+                assertThrows(DownloadSecurity::class.java) {
+                    PreparedApk.verify(partial, app, files, fakeInspector(), DownloadCancellation(), TEST_NOW)
+                }
+                assertFalse(partial.exists())
+                assertTrue(files.verifiedDirectory.listFiles().isNullOrEmpty())
+            }
+        }
+    }
     @Test fun matchingOfficialShaAndPackagePublishesOnlyVerifiedFile() {
         val app = preparedApp().let { it.copy(apk = it.apk.copy(sha256 = hash(APK_BYTES).uppercase())) }
         val (result, files) = verify(app = app)

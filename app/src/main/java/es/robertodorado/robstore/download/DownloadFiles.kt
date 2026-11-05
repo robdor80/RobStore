@@ -32,7 +32,7 @@ internal class DownloadFiles(root: File,
     fun space(required: Long) {
         if (available(directory) < required + RESERVE) throw IOException("Espacio privado insuficiente. Libera espacio y reintenta.")
     }
-    fun receive(app: CatalogApp, client: BinaryClient, cancellation: DownloadCancellation,
+    fun receive(app: ReleaseArtifact, client: BinaryClient, cancellation: DownloadCancellation,
         progress: (Long, Long) -> Unit): File {
         val target = partial()
         try {
