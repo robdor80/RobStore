@@ -98,6 +98,14 @@ class LegacyTests(unittest.TestCase):
     def verify_api(self):
         return m.verified_legacy(REPO, self.release, self.b)
 
+    def test_null_present_contract_never_uses_legacy_fallback(self):
+        for content in ('null', '[]', '"invalid"'):
+            with self.subTest(content=content), patch.object(m, 'api', side_effect=[self.reference, [dict(name=d.CONTRACT)]]), \
+                    patch.object(m, 'raw_file', return_value=content), patch.object(m, 'download_legacy_asset') as download, \
+                    self.assertRaises(ValueError):
+                self.verify_api()
+            download.assert_not_called()
+
     def test_present_contract_is_never_bypassed(self):
         with patch.object(m, 'api', side_effect=[self.reference, [dict(name=d.CONTRACT)]]), \
                 patch.object(m, 'raw_file', return_value='malformed'), self.assertRaises(ValueError):

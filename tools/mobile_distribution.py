@@ -184,7 +184,7 @@ def inspect(apk, channel, certificate, settings):
 
 def legacy_baselines(repo):
     # Trust only the registry shipped in the reviewed, SHA-pinned CENTRAL tooling.
-    registry = d.load(Path(__file__).with_name('approved-legacy-publications.json'))
+    registry = json.loads(Path(__file__).with_name('approved-legacy-publications.json').read_text(encoding='utf-8'))
     d.require(registry['schemaVersion'] == 1, 'Unsupported legacy registry')
     entries = registry['publications']
     d.require(len({(b['repository'], b['tag']) for b in entries}) == len(entries), 'Duplicate legacy approvals')
@@ -198,8 +198,8 @@ def historical_certificate(repo, channel, certificate):
                       'Release identity must match the approved historical APK; never generate a replacement')
 
 
-def verified_legacy(repo, release, baseline):
-    """Read-only verification. No fallback on API errors, drafts or altered assets."""
+def legacy_metadata(repo, release, baseline):
+    """Bind historical metadata to GitHub and an immutable commit, fail closed."""
     b = baseline
     d.require(repo == b['repository'] and release['tag_name'] == b['tag'] and
               release['id'] == b['releaseId'] and release['draft'] is False and
@@ -214,7 +214,9 @@ def verified_legacy(repo, release, baseline):
     listing = api(f"repos/{repo}/contents?ref={b['tagCommit']}")
     d.require(isinstance(listing, list) and len(listing) < 1000, 'Invalid historical root listing')
     if any(item['name'] == d.CONTRACT for item in listing):
-        return json.loads(raw_file(repo, b['tagCommit'], d.CONTRACT))
+        previous = json.loads(raw_file(repo, b['tagCommit'], d.CONTRACT))
+        d.require(isinstance(previous, dict), 'Invalid modern publication contract; never use a legacy fallback')
+        return previous
     assets = [a for a in release['assets'] if a['name'] == b['apkAssetName']]
     d.require(len(assets) == 1 and assets[0]['id'] == b['assetId'] and assets[0]['state'] == 'uploaded' and
               assets[0].get('digest') == 'sha256:' + b['sha256'] and 0 < assets[0]['size'] <= 512 * 1024 * 1024,
@@ -223,13 +225,33 @@ def verified_legacy(repo, release, baseline):
     d.require(catalog['packageName'] == b['packageName'] and catalog['apkAssetName'] == b['apkAssetName'] and
               all(catalog.get(k, b[k]) == b[k] for k in ('versionCode', 'versionName')),
               'Legacy catalog identity/version mismatch')
+    return None
+
+
+def download_legacy_asset(repo, release, baseline, directory):
+    """Download public evidence by ID, never a mutable tag URL. Verify exact bytes."""
+    b = baseline
+    assets = [a for a in release['assets'] if a['name'] == b['apkAssetName']]
+    d.require(len(assets) == 1 and assets[0]['id'] == b['assetId'] and assets[0]['state'] == 'uploaded' and
+              assets[0].get('digest') == 'sha256:' + b['sha256'] and 0 < assets[0]['size'] <= 512 * 1024 * 1024,
+              'Approved legacy asset/digest mismatch (GitHub SHA-256 is mandatory)')
+    apk = Path(directory) / b['apkAssetName']
+    with apk.open('xb') as stream:
+        result = subprocess.run(['gh', 'api', '-H', 'Accept: application/octet-stream',
+            f"repos/{repo}/releases/assets/{b['assetId']}"], stdout=stream, stderr=subprocess.PIPE)
+    d.require(result.returncode == 0 and apk.stat().st_size == assets[0]['size'] and
+              d.digest(apk) == b['sha256'], 'Downloaded historical APK differs from approved SHA-256')
+    return apk
+
+
+def verified_legacy(repo, release, baseline):
+    """Full runner verification. Keep modern contracts and all APK checks unchanged."""
+    b = baseline
+    previous = legacy_metadata(repo, release, b)
+    if previous is not None:
+        return previous
     with tempfile.TemporaryDirectory(prefix='verified-legacy-') as folder:
-        apk = Path(folder) / b['apkAssetName']
-        with apk.open('wb') as stream:
-            result = subprocess.run(['gh', 'api', '-H', 'Accept: application/octet-stream',
-                f"repos/{repo}/releases/assets/{b['assetId']}"], stdout=stream, stderr=subprocess.PIPE)
-        d.require(result.returncode == 0 and apk.stat().st_size == assets[0]['size'] and
-                  d.digest(apk) == b['sha256'], 'Downloaded historical APK differs from approved SHA-256')
+        apk = download_legacy_asset(repo, release, b, folder)
         settings = dict(repository=repo, robstorePolicy=False, packages=dict(release=b['packageName']),
                         minSdk=b['minSdk'], targetSdk=b['targetSdk'])
         actual = inspect(apk, 'release', b['certificateSha256'], settings)

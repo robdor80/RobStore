@@ -55,7 +55,9 @@ historial aprobado de RobStore/main. Son dos referencias con responsabilidades
 distintas: workflow auditado y tooling central aprobado. El tooling original
 `b15d775...` NO resuelve el legacy; no usarlo como variable para esta aplicación.
 
-Tras revisar y fusionar personalmente la PR central, elegir un SHA completo de
+La adaptación base se incorporó externamente mediante la PR #7 a
+`ce63ca1a323e0021036d1ca099fa04943f67f398`. Después de revisar e incorporar la
+corrección de alta Termux, elegir un SHA completo de
 RobStore/main que contenga este registro, el motor y el importador. Ejecutar el
 importador desde ESE checkout. No utilizar una rama de PR como tooling ni habilitar
 la distribución antes de la fusión. No es necesario modificar el workflow central
@@ -71,28 +73,28 @@ generar Release para un repositorio con baseline histórico.
 1. Recuperar el keystore histórico en el HOME privado de Termux, fuera de Git y de
    `/sdcard`/almacenamiento compartido. Recuperar alias y contraseñas con el gestor
    personal. No introducirlas en argumentos, archivos de proyecto o chat.
-2. Instalar personalmente `python`, `gh`, `git`, `gnupg`, `openjdk-17`, y versiones
-   nativas para la arquitectura del teléfono de `aapt`, `zipalign` y `apksigner`.
-   En Termux comprobar disponibilidad de sus paquetes (`pkg search`) antes de
-   instalarlos. No ejecutar binarios Linux x86 del SDK en un teléfono ARM.
-   El importador necesita los tres comandos operativos y Java; no Android Studio.
-   Si el repositorio Termux no proporciona alguna herramienta, hay que resolverlo
-   con paquetes nativos de confianza antes de continuar; no omitir verificaciones.
-3. Para el verificador común RS-05, crear un directorio de herramientas sin claves:
+2. Instalar los paquetes mantenidos de Termux:
 
    ```bash
-   set +x
-   export ANDROID_HOME="$HOME/rs05-native-tools"
-   mkdir -p "$ANDROID_HOME/build-tools/35.0.0"
-   for tool in aapt zipalign apksigner; do
-     resolved=$(command -v "$tool") || exit 1
-     ln -s "$resolved" "$ANDROID_HOME/build-tools/35.0.0/$tool" || exit 1
-   done
+   pkg update
+   pkg install git python gh openjdk-21 gnupg pinentry apksigner
+   export GPG_TTY=$(tty)
+   gh auth login --web
    ```
 
-   Usar un directorio nuevo. Los enlaces no son una instalación del SDK ni cambian
-   las herramientas usadas por Actions; sólo permiten usar los comandos nativos
-   de Termux en la verificación local del propietario.
+   El paquete apksigner proporciona `$PREFIX/share/java/apksigner.jar`. El alta usa
+   explícitamente ese verificador Java para que funcione en ARM sin SDK Linux x86,
+   aapt, zipalign ni enlaces simulando ANDROID_HOME. Si falta el JAR se detiene.
+   El runner de distribución conserva su verificación completa con SDK35: firma,
+   hash, paquete, versión, SDK y alineación. El alta personal verifica el mismo APK
+   exacto mediante hash aprobado y certificado; no cambia las reglas del runner.
+3. Comprobar que Java y el JAR del paquete están disponibles:
+
+   ```bash
+   java -version
+   test -f "$PREFIX/share/java/apksigner.jar" || exit 1
+   ```
+
 4. Descargar y comprobar personalmente el APK oficial en un directorio privado:
 
    ```bash
@@ -103,7 +105,7 @@ generar Release para un repositorio con baseline histórico.
    printf '%s  %s\n' \
      e514c058212eb1bd11f9747488f82ca22b904de40ce46a250ea93ebe462e362a \
      cuadrante-v1.0.0.apk | sha256sum -c - || exit 1
-   apksigner verify --verbose --print-certs cuadrante-v1.0.0.apk || exit 1
+   java -jar "$PREFIX/share/java/apksigner.jar" verify --verbose --print-certs cuadrante-v1.0.0.apk || exit 1
    ```
 
    Debe mostrar un único certificado con la huella pública indicada arriba.
@@ -156,7 +158,7 @@ generar Release para un repositorio con baseline histórico.
 
 ## Antes del primer prepare real
 
-Fusionar las dos PR tras revisión independiente y obtener CI Android PASS para
+Revisar e incorporar las PR complementarias de auditoría y obtener CI Android PASS para
 el HEAD real de Cuadrante/main. El propietario debe completar la importación,
 respaldo y protecciones anteriores. Implementar la futura funcionalidad y aumentar
 versionCode (>1), por ejemplo 2/1.1.0, en otra tarea. Sustituir las notas
@@ -190,3 +192,22 @@ sustituye esa prueba física ni afirma que los entornos/secrets estén configura
 
 El importador exige un checkout central limpio exactamente en `--tooling-sha` y
 usa umask 077. No importa sobre un destino existente ni sobre el original.
+
+
+## Auditoría posterior al avance de main
+
+Esta sesión comenzó en b15d775 (RobStore) y a7e27c1 (Cuadrante). Durante el trabajo
+se detectaron fusiones externas: RobStore #7 -> ce63ca1a323e0021036d1ca099fa04943f67f398,
+Cuadrante #2 -> f1d918f66940d2699c227f9e67afc4eb130e9c75, ambos con CI main PASS.
+No se hicieron esas fusiones desde esta tarea. La corrección actual se basa en esos
+main; conserva su baseline, argumentos de importación, configuración y workflow auditado.
+La PR #8 también se incorporó externamente a
+`50a7ec0f2f0720040467d1187fb07b67ff8b27c0`; esta corrección parte de ese main
+y conserva su parser nativo. El alta personal usa el JAR Java explícito. No requiere esa excepción nativa para funcionar en Termux.
+
+Antes de subir secretos se comprueba que los alias importados/recuperados sean entradas
+privadas, que las rutas estén fuera de cualquier repositorio Git y que también los entornos
+recién creados cumplan efectivamente sus protecciones (relectura de GitHub). Se conserva
+el rechazo de pins diferentes o secretos sin identidad y la prueba de respaldo cifrado.
+La integración JKS con passwords distintos demuestra que normalizar el contenedor preserva
+el certificado; las claves de esas pruebas son efímeras y nunca identidades del propietario.
