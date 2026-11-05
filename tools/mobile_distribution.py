@@ -151,7 +151,7 @@ def inspect(apk, channel, certificate, settings):
         return d.inspect_apk(apk, channel, certificate)
     tool = d.tools()
     signature = d.run(tool / 'apksigner', 'verify', '--verbose', '--print-certs', apk)
-    certs = re.findall(r'^Signer #\d+ certificate SHA-256 digest: ([a-fA-F0-9]{64})$', signature, re.M)
+    certs = d.signer_certificates(signature)
     d.require(len(certs) == 1 and certs[0].lower() == d.fingerprint(certificate), 'Unexpected APK signer')
     d.require('Verified using v2 scheme (APK Signature Scheme v2): true' in signature, 'APK v2 signature required')
     d.run(tool / 'zipalign', '-c', '-p', '4', apk)
