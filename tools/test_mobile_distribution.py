@@ -284,6 +284,16 @@ class MobileSignedTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             m.inspect(apk, 'dev', self.fixture.certificates[0], settings)
 
+    def test_import_actual_ephemeral_key_preserves_certificate(self):
+        password = self.fixture.env['ROBSTORE_TEST_PASSWORD']
+        destination = self.root / 'normalized-release.p12'
+        with patch('builtins.input', return_value='fixture'), patch.object(owner_setup.getpass, 'getpass', return_value=password):
+            owner_setup.import_release(self.fixture.directory / 'fixture-1.p12', destination, password,
+                                       self.fixture.certificates[0])
+        certificate = owner_setup.command(['keytool', '-exportcert', '-keystore', destination,
+            '-alias', 'android-release', '-storepass:env', 'ROBSTORE_TEST_PASSWORD'], environment=self.fixture.env)
+        self.assertEqual(__import__('hashlib').sha256(certificate).hexdigest(), self.fixture.certificates[0])
+
     def test_catalog_manifest_uses_final_apk_metadata(self):
         self.sign()
         icon = Path(self.settings['iconSource']).read_bytes()

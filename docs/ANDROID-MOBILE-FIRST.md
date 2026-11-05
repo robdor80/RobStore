@@ -241,3 +241,7 @@ P05 (actualización física, conservación de datos, cancelación/rechazo, termi
 accesibilidad) permanece pendiente de autorización. La preparación del pipeline y fixtures
 no certifica una firma definitiva ni una publicación real. Todo lo sensible aún requiere
 el alta personal Android y las aprobaciones descritas; no se ejecutan en esta tarea.
+
+Para aplicaciones con una Release anterior a P04 y una identidad privada ya
+existente, consultar [transición e importación histórica de Cuadrante](RS-05-CUADRANTE-LEGACY.md).
+No ejecutar el modo de generación de Release para Cuadrante.

@@ -74,6 +74,53 @@ def restore_backup(directory, ciphertext, repo):
         target.chmod(0o600)
 
 
+def verify_historical_release(repo, tag):
+    from mobile_distribution import legacy_baselines, verified_legacy, api
+    approved = [b for b in legacy_baselines(repo) if b['tag'] == tag]
+    require(len(approved) == 1, 'An explicit reviewed historical publication is required')
+    b = approved[0]
+    verified_legacy(repo, api(f'repos/{repo}/releases/tags/{tag}'), b)
+    return b['certificateSha256']
+
+
+def import_release(source, destination, password, expected):
+    # Normalize an existing JKS/PKCS12 key into the RS-05 backup layout, retaining its identity.
+    source = Path(source).expanduser().resolve()
+    require(source.is_file() and 0 < source.stat().st_size <= 1024 * 1024 and source != destination and not destination.exists(),
+            'Invalid historical keystore; original will never be overwritten')
+    alias = input('Alias de la clave Release histórica: ').strip()
+    require(alias and not alias.startswith('-'), 'Historical alias required')
+    source_password = getpass.getpass('Contraseña del keystore histórico: ')
+    key_password = getpass.getpass('Contraseña de la clave histórica (vacío = la del keystore): ') or source_password
+    environment = dict(os.environ, ANDROID_OWNER_SOURCE_PASSWORD=source_password,
+                       ANDROID_OWNER_SOURCE_KEY_PASSWORD=key_password, ANDROID_OWNER_KEY_PASSWORD=password)
+    certificate = command(['keytool', '-exportcert', '-keystore', source, '-alias', alias,
+                           '-storepass:env', 'ANDROID_OWNER_SOURCE_PASSWORD'], environment=environment)
+    require(hashlib.sha256(certificate).hexdigest() == expected,
+            'Historical keystore does not match official APK; STOP, do not generate another Release key')
+    command(['keytool', '-importkeystore', '-noprompt', '-srckeystore', source, '-srcalias', alias,
+             '-srcstorepass:env', 'ANDROID_OWNER_SOURCE_PASSWORD', '-srckeypass:env', 'ANDROID_OWNER_SOURCE_KEY_PASSWORD',
+             '-destkeystore', destination, '-deststoretype', 'PKCS12', '-destalias', 'android-release',
+             '-deststorepass:env', 'ANDROID_OWNER_KEY_PASSWORD', '-destkeypass:env', 'ANDROID_OWNER_KEY_PASSWORD'],
+             environment=environment)
+
+
+def check_existing_identities(repo, public):
+    # Check every public pin, including the publish environment, before the first secret write.
+    for channel in ('release', 'dev'):
+        existing = gh_api(f'repos/{repo}/environments/android-{channel}/variables')['variables']
+        pins = {v['name']: v['value'] for v in existing}
+        for key, expected in dict(CERTIFICATE_SHA256=public['certificates'][channel],
+            OTHER_CERTIFICATE_SHA256=public['certificates']['dev' if channel == 'release' else 'release']).items():
+            require(pins.get(key, expected) == expected, 'Existing identity differs; do not replace secrets')
+        secrets = gh_api(f'repos/{repo}/environments/android-{channel}/secrets')['secrets']
+        require(not secrets or 'CERTIFICATE_SHA256' in pins, 'Existing secrets without a public identity pin; owner must investigate')
+    pins = {v['name']: v['value'] for v in gh_api(f'repos/{repo}/environments/android-publish/variables')['variables']}
+    for channel in ('release', 'dev'):
+        require(pins.get(channel.upper() + '_CERTIFICATE_SHA256', public['certificates'][channel]) == public['certificates'][channel],
+                'Existing publication identity differs; never replace it')
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--repository', required=True)
@@ -82,10 +129,13 @@ def main():
     recovery = parser.add_mutually_exclusive_group()
     recovery.add_argument('--resume', action='store_true', help='Recover interrupted setup using the same identities; never regenerate keys')
     recovery.add_argument('--restore-backup', help='Restore encrypted Drive backup into a new private directory; never regenerate keys')
+    recovery.add_argument('--import-release-keystore', help='OWNER ONLY: import an existing historical private key; never generate Release')
+    parser.add_argument('--legacy-tag', help='Exact historical tag in the reviewed central approval registry')
     parser.add_argument('--catalog', action='store_true', help='Add robstore-app without removing existing topics; repository must already be public')
     args = parser.parse_args()
     require('com.termux' in os.environ.get('PREFIX', '') and not os.environ.get('CI') and not os.environ.get('CODEX_THREAD_ID'),
             'Run personally in Android Termux, never Cloud/CI/Codex')
+    os.umask(0o077)
     require(re.fullmatch(r'robdor80/[A-Za-z0-9_.-]+', args.repository), 'Personal owner repository required')
     require(re.fullmatch('[0-9a-f]{40}', args.tooling_sha), 'Audited central tooling SHA required')
     require(gh_api('user')['login'] == 'robdor80', 'Authenticate personally as owner first')
@@ -93,14 +143,31 @@ def main():
     require(not repository['fork'] and repository['default_branch'] == 'main', 'Use an original repository with main')
     require(not args.catalog or not repository['private'], 'RobStore catalog requires an explicitly public repository')
     require(gh_api(f'repos/robdor80/RobStore/compare/{args.tooling_sha}...main')['status'] in ('ahead', 'identical'), 'Tooling not yet approved in main')
+    from mobile_distribution import legacy_baselines
+    historical = legacy_baselines(args.repository)
+    require(not args.import_release_keystore or args.legacy_tag, 'Import requires an approved historical tag')
+    require(not historical or args.resume or args.restore_backup or args.import_release_keystore,
+            'Historical Release exists: import or recover its key; generation is forbidden')
+    historical_pin = None
+    if historical or args.import_release_keystore:
+        tag = args.legacy_tag or historical[0]['tag']
+        historical_pin = verify_historical_release(args.repository, tag)
     directory = Path(args.private_directory).expanduser().resolve()
     require(directory.is_dir() if args.resume else not directory.exists(), 'Use a new private directory, or --resume with the original identities')
     checkout = Path(command(['git', 'rev-parse', '--show-toplevel']).decode().strip()).resolve()
+    require(command(['git', 'rev-parse', 'HEAD']).decode().strip() == args.tooling_sha and
+            not command(['git', 'status', '--porcelain', '--untracked-files=all']).strip(),
+            'Run the clean central checkout at exactly the approved tooling SHA')
     require(not directory.is_relative_to(checkout) and directory.is_relative_to(Path.home()), 'Use private Termux home outside Git/shared storage')
+    if args.import_release_keystore:
+        imported_source = Path(args.import_release_keystore).expanduser().resolve()
+        require(imported_source.is_relative_to(Path.home()) and not imported_source.is_relative_to(checkout),
+                'Recover historical keystore into private Termux home outside Git/shared storage')
     if args.restore_backup:
         restore_backup(directory, Path(args.restore_backup).expanduser().resolve(), args.repository)
         args.resume = True
-    confirmation = 'RECUPERAR CONFIGURACION' if args.resume else 'CREAR IDENTIDADES'
+    confirmation = ('RECUPERAR CONFIGURACION' if args.resume else
+                    'IMPORTAR IDENTIDAD RELEASE' if args.import_release_keystore else 'CREAR IDENTIDADES')
     require(input('Escribe ' + confirmation + ' para esta aplicación: ') == confirmation, 'Owner cancelled')
     if not args.resume:
         existing = {x['name'] for x in gh_api(f'repos/{args.repository}/environments')['environments']}
@@ -116,7 +183,9 @@ def main():
         passwords[channel] = password
         environment = dict(os.environ, ANDROID_OWNER_KEY_PASSWORD=password)
         store = directory / (channel + '.p12')
-        if not args.resume:
+        if not args.resume and channel == 'release' and args.import_release_keystore:
+            import_release(args.import_release_keystore, store, password, historical_pin)
+        elif not args.resume:
             command(['keytool', '-genkeypair', '-storetype', 'PKCS12', '-keystore', store,
                      '-alias', 'android-' + channel, '-keyalg', 'RSA', '-keysize', '3072', '-sigalg', 'SHA256withRSA',
                      '-validity', '10000', '-dname', 'CN=' + args.repository.replace('/', '-') + '-' + channel,
@@ -126,6 +195,8 @@ def main():
                         '-storepass:env', 'ANDROID_OWNER_KEY_PASSWORD'], environment=environment)
         pin = hashlib.sha256(cert).hexdigest()
         require(not args.resume or public['certificates'][channel] == pin, 'Recovered certificate differs; never rotate silently')
+        require(channel != 'release' or historical_pin is None or pin == historical_pin,
+                'Recovered Release certificate differs from the official historical APK')
         public['certificates'][channel] = pin
     require(public['certificates']['release'] != public['certificates']['dev'], 'Release and DEV identities must differ')
     (directory / 'public-identities.json').write_text(json.dumps(public, indent=2) + '\n')
@@ -141,11 +212,8 @@ def main():
         else:
             from mobile_distribution import protected_environment
             protected_environment(args.repository, name)
-    # Verify existing public pins before replacing any encrypted secret during recovery.
-    for channel in ('release', 'dev'):
-        existing = gh_api(f'repos/{args.repository}/environments/android-{channel}/variables')['variables']
-        pins = {v['name']: v['value'] for v in existing}
-        require(pins.get('CERTIFICATE_SHA256', public['certificates'][channel]) == public['certificates'][channel], 'Existing identity differs; do not replace secrets')
+    check_existing_identities(args.repository, public)
+    command(['gh', 'variable', 'set', 'ANDROID_DISTRIBUTION_ENABLED', '--repo', args.repository, '--body', 'false'])
     for channel in ('release', 'dev'):
         name = 'android-' + channel
         values = dict(SIGNING_KEYSTORE_B64=base64.b64encode((directory / (channel + '.p12')).read_bytes()).decode(),

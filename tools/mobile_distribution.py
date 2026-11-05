@@ -170,11 +170,78 @@ def inspect(apk, channel, certificate, settings):
                 versionName=name, apkAssetName=Path(apk).name, sha256=d.digest(apk))
 
 
+def legacy_baselines(repo):
+    # Trust only the registry shipped in the reviewed, SHA-pinned CENTRAL tooling.
+    registry = d.load(Path(__file__).with_name('approved-legacy-publications.json'))
+    d.require(registry['schemaVersion'] == 1, 'Unsupported legacy registry')
+    entries = registry['publications']
+    d.require(len({(b['repository'], b['tag']) for b in entries}) == len(entries), 'Duplicate legacy approvals')
+    return [b for b in entries if b['repository'] == repo]
+
+
+def historical_certificate(repo, channel, certificate):
+    if channel == 'release':
+        for baseline in legacy_baselines(repo):
+            d.require(d.fingerprint(certificate) == baseline['certificateSha256'],
+                      'Release identity must match the approved historical APK; never generate a replacement')
+
+
+def verified_legacy(repo, release, baseline):
+    """Read-only verification. No fallback on API errors, drafts or altered assets."""
+    b = baseline
+    d.require(repo == b['repository'] and release['tag_name'] == b['tag'] and
+              release['id'] == b['releaseId'] and release['draft'] is False and
+              release['prerelease'] is False and bool(release['published_at']) and
+              release['url'] == f"https://api.github.com/repos/{repo}/releases/{b['releaseId']}",
+              'Legacy approval does not match a published stable Release')
+    reference = api(f"repos/{repo}/git/ref/tags/{quote(b['tag'], safe='')}")
+    d.require(reference['object'] == dict(type='commit', sha=b['tagCommit'],
+              url=f"https://api.github.com/repos/{repo}/git/commits/{b['tagCommit']}"),
+              'Approved historical tag moved or changed type')
+    # Inspect the immutable tree; absence must be established by a successful API response.
+    listing = api(f"repos/{repo}/contents?ref={b['tagCommit']}")
+    d.require(isinstance(listing, list) and len(listing) < 1000, 'Invalid historical root listing')
+    if any(item['name'] == d.CONTRACT for item in listing):
+        return json.loads(raw_file(repo, b['tagCommit'], d.CONTRACT))
+    assets = [a for a in release['assets'] if a['name'] == b['apkAssetName']]
+    d.require(len(assets) == 1 and assets[0]['id'] == b['assetId'] and assets[0]['state'] == 'uploaded' and
+              assets[0].get('digest') == 'sha256:' + b['sha256'] and 0 < assets[0]['size'] <= 512 * 1024 * 1024,
+              'Approved legacy asset/digest mismatch (GitHub SHA-256 is mandatory)')
+    catalog = json.loads(raw_file(repo, b['tagCommit'], 'robstore.json'))
+    d.require(catalog['packageName'] == b['packageName'] and catalog['apkAssetName'] == b['apkAssetName'] and
+              all(catalog.get(k, b[k]) == b[k] for k in ('versionCode', 'versionName')),
+              'Legacy catalog identity/version mismatch')
+    with tempfile.TemporaryDirectory(prefix='verified-legacy-') as folder:
+        apk = Path(folder) / b['apkAssetName']
+        with apk.open('wb') as stream:
+            result = subprocess.run(['gh', 'api', '-H', 'Accept: application/octet-stream',
+                f"repos/{repo}/releases/assets/{b['assetId']}"], stdout=stream, stderr=subprocess.PIPE)
+        d.require(result.returncode == 0 and apk.stat().st_size == assets[0]['size'] and
+                  d.digest(apk) == b['sha256'], 'Downloaded historical APK differs from approved SHA-256')
+        settings = dict(repository=repo, robstorePolicy=False, packages=dict(release=b['packageName']),
+                        minSdk=b['minSdk'], targetSdk=b['targetSdk'])
+        actual = inspect(apk, 'release', b['certificateSha256'], settings)
+    expected = dict(schemaVersion=1, channel='release', **{k: b[k] for k in
+                    ('packageName', 'versionCode', 'versionName', 'apkAssetName', 'sha256')})
+    d.validate_contract(actual, expected)
+    print(f"Explicit legacy approval verified: {repo} {b['tag']} SHA-256 {b['sha256']}")
+    return actual
+
+
 def increasing(repo, contract):
-    for release in pages(f'repos/{repo}/releases'):
+    releases = pages(f'repos/{repo}/releases')
+    baselines = legacy_baselines(repo) if contract['channel'] == 'release' else []
+    for baseline in baselines:
+        matches = [r for r in releases if r['tag_name'] == baseline['tag']]
+        d.require(len(matches) == 1 and matches[0]['draft'] is False and matches[0]['prerelease'] is False,
+                  'Approved legacy Release must remain present, published and stable')
+        d.increasing(contract, dict(channel='release', packageName=baseline['packageName'], versionCode=baseline['versionCode']))
+    for release in releases:
         if release['draft'] or release['prerelease'] != (contract['channel'] == 'dev'):
             continue
-        previous = json.loads(raw_file(repo, 'refs/tags/' + release['tag_name'], d.CONTRACT))
+        approved = [b for b in baselines if b['tag'] == release['tag_name']]
+        previous = (verified_legacy(repo, release, approved[0]) if approved else
+                    json.loads(raw_file(repo, 'refs/tags/' + release['tag_name'], d.CONTRACT)))
         d.increasing(contract, previous)
         assets = [a for a in release['assets'] if a['name'] == previous['apkAssetName']]
         d.require(len(assets) == 1 and assets[0]['state'] == 'uploaded' and
@@ -188,6 +255,7 @@ def expected_tag(contract):
 def sign(args):
     settings = config(d.load(args.config_output), os.environ['GITHUB_REPOSITORY'])
     certificate = d.fingerprint(os.environ['CERTIFICATE_SHA256'])
+    historical_certificate(settings['repository'], args.channel, certificate)
     other = d.fingerprint(os.environ['OTHER_CERTIFICATE_SHA256'])
     d.require(certificate != other, 'Release and DEV certificates must differ')
     d.require(os.environ.get('ACTIONS_STEP_DEBUG') != 'true' and os.environ.get('ACTIONS_RUNNER_DEBUG') != 'true', 'Debug runner forbidden for signing')
@@ -228,6 +296,7 @@ def candidate(args, settings):
     d.require(set(p.name for p in directory.iterdir()) <= {d.CONTRACT, d.RECEIPT, 'SHA256SUMS', f'Android-{args.channel}.apk', f'Android-{args.channel}.apk.idsig'}, 'Unexpected candidate files')
     d.require(contract['apkAssetName'] == f'Android-{args.channel}.apk', 'Unexpected asset name')
     apk = directory / contract['apkAssetName']
+    historical_certificate(settings['repository'], args.channel, os.environ['CERTIFICATE_SHA256'])
     actual = inspect(apk, args.channel, os.environ['CERTIFICATE_SHA256'], settings)
     d.validate_contract(contract, actual)
     d.require(contract['sha256'] == d.fingerprint(args.expected_sha256), 'Owner approved another APK hash')
