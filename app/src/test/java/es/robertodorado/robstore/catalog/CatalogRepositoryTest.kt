@@ -38,7 +38,7 @@ class CatalogRepositoryTest {
         assertNull(repository.state.value.snapshot); assertTrue(repository.state.value.failed)
         assertFalse(repository.state.value.loading); assertFalse(repository.state.value.refreshing)
     }
-    @Test fun manualRefreshDoesNotWaitAndDetectsNewRelease() = runTest {
+    @Test fun manualRefreshIsRealThrottledAndDetectsNewRelease() = runTest {
         var time = TEST_NOW
         val cache = MemoryCache(fixtureSnapshot())
         val transport = FixtureTransport()
