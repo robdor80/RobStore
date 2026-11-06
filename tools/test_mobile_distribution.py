@@ -300,6 +300,14 @@ class MobileSignedTests(unittest.TestCase):
         self.sign()
         self.assertEqual(self.args.tag, 'v0.1.0-1')
 
+    def test_wrapped_base64_and_absent_alias_preserve_existing_signer(self):
+        self.env['SIGNING_ALIAS'] = ''
+        encoded = self.env['SIGNING_KEYSTORE_B64']
+        self.env['SIGNING_KEYSTORE_B64'] = '\n'.join(encoded[i:i + 76] for i in range(0, len(encoded), 76)) + '\n'
+        self.sign()
+        receipt = d.load(Path(self.args.directory) / d.RECEIPT)
+        self.assertEqual(receipt['certificateSha256'], self.fixture.certificates[0])
+
     def test_wrong_keys_fail_certificate_verification(self):
         for index, pin in enumerate((self.fixture.certificates[1], '00' * 32)):
             self.args.directory = str(self.root / f'bad-key-{index}')

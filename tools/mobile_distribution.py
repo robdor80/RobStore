@@ -238,19 +238,39 @@ def expected_tag(contract):
     return f"{prefix}{version}-{contract['versionCode']}"
 
 
+def signing_preflight(store):
+    """Check credentials locally on the runner; never expose provider output or aliases."""
+    result = subprocess.run(['java', str(Path(__file__).with_name('SigningPreflight.java')), str(store)],
+                            capture_output=True, text=True)
+    errors = {
+        'STORE_PASSWORD': 'SIGNING_STORE_PASSWORD no abre el keystore; comprobar también que SIGNING_KEYSTORE_B64 conserva el archivo original íntegro.',
+        'STORE_FORMAT': 'SIGNING_KEYSTORE_B64 no contiene un keystore JKS o PKCS12 reconocido.',
+        'ALIAS': 'SIGNING_ALIAS no identifica una clave privada del keystore existente.',
+        'CERTIFICATE': 'SIGNING_ALIAS o SIGNING_KEYSTORE_B64 no corresponden al certificado histórico fijado; no cambiar CERTIFICATE_SHA256.',
+        'KEY_PASSWORD': 'SIGNING_KEY_PASSWORD no desbloquea la clave privada existente (si no está definido se usa SIGNING_STORE_PASSWORD).',
+    }
+    if result.returncode:
+        raise ValueError(errors.get(result.stderr.strip(), 'No se pudo ejecutar el diagnóstico Java del keystore en el runner.') +
+                         ' Corregir únicamente el secreto indicado en el mismo entorno; no regenerar la clave Release.')
+    os.environ['SIGNING_ALIAS'] = base64.b64decode(result.stdout, validate=True).decode('utf-8')
+    print('Signing preflight: keystore JKS/PKCS12, alias, contraseñas y certificado histórico verificados.')
+
+
 def sign(args):
     settings = config(d.load(args.config_output), os.environ['GITHUB_REPOSITORY'])
     certificate = d.fingerprint(os.environ['CERTIFICATE_SHA256'])
     historical_certificate(settings['repository'], args.channel, certificate)
     # Older setups may have a distinct key password; new PKCS12 keys need only one.
-    if not os.environ.get('SIGNING_ALIAS'):
-        os.environ['SIGNING_ALIAS'] = 'android-' + args.channel
     if not os.environ.get('SIGNING_KEY_PASSWORD'):
         os.environ['SIGNING_KEY_PASSWORD'] = os.environ.get('SIGNING_STORE_PASSWORD', '')
     encoded = os.environ['SIGNING_KEYSTORE_B64']
     d.require(0 < len(encoded) < 1400000 and all(os.environ.get(k) for k in
-              ('SIGNING_STORE_PASSWORD', 'SIGNING_KEY_PASSWORD', 'SIGNING_ALIAS')), 'Private signing configuration missing')
-    key = base64.b64decode(encoded, validate=True)
+              ('SIGNING_STORE_PASSWORD', 'SIGNING_KEY_PASSWORD')), 'SIGNING_STORE_PASSWORD o SIGNING_KEYSTORE_B64 ausente')
+    try:
+        # Wrapped base64 from the owner's original setup is valid too; reject all other garbage.
+        key = base64.b64decode(''.join(encoded.split()), validate=True)
+    except ValueError:
+        raise ValueError('SIGNING_KEYSTORE_B64 no es base64 válido; conservar el keystore original') from None
     output = Path(args.directory)
     output.mkdir(parents=True, exist_ok=False)
     apk = output / f"Android-{args.channel}.apk"
@@ -258,6 +278,7 @@ def sign(args):
         store = Path(private) / 'signing.p12'
         store.write_bytes(key)
         store.chmod(0o600)
+        signing_preflight(store)
         d.run(d.tools() / 'apksigner', 'sign', '--ks', store, '--ks-key-alias', os.environ['SIGNING_ALIAS'],
               '--ks-pass', 'env:SIGNING_STORE_PASSWORD', '--key-pass', 'env:SIGNING_KEY_PASSWORD',
               '--v1-signing-enabled', 'false', '--v2-signing-enabled', 'true', '--out', apk, args.apk)
