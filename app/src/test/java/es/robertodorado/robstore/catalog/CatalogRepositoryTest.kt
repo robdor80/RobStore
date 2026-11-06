@@ -38,20 +38,17 @@ class CatalogRepositoryTest {
         assertNull(repository.state.value.snapshot); assertTrue(repository.state.value.failed)
         assertFalse(repository.state.value.loading); assertFalse(repository.state.value.refreshing)
     }
-    @Test fun manualRefreshIsRealThrottledAndDetectsNewRelease() = runTest {
+    @Test fun manualRefreshDoesNotWaitAndDetectsNewRelease() = runTest {
         var time = TEST_NOW
         val cache = MemoryCache(fixtureSnapshot())
         val transport = FixtureTransport()
         val repository = CatalogRepository(cache, GitHubClient(transport, cache) { time }, { time }, StandardTestDispatcher(testScheduler))
         repository.initialize(); assertEquals(0, transport.requests.size)
         repository.refresh(); assertEquals(4, transport.requests.size)
-        repository.refresh(); assertEquals(4, transport.requests.size)
-        assertTrue(repository.state.value.message!!.contains("5 minutos"))
-        assertFalse(repository.state.value.message!!.contains(java.time.Instant.ofEpochMilli(TEST_NOW + CatalogPolicy.MANUAL_INTERVAL).toString()))
-        assertEquals(TEST_NOW + CatalogPolicy.MANUAL_INTERVAL, repository.state.value.nextRefreshAt)
-        time += CatalogPolicy.MANUAL_INTERVAL
+        assertEquals(0L, repository.state.value.nextRefreshAt)
         transport.releases = listOf(fixtureRelease(tag = "new-edition"))
         transport.assets = listOf(fixtureAsset(url = "https://github.com/robdor80/Demo/releases/download/new-edition/app-release.apk"))
+        time += 1000
         repository.refresh(); assertEquals(8, transport.requests.size)
         assertEquals("new-edition", repository.state.value.snapshot!!.apps.single().release.tag)
         assertEquals(time, cache.snapshot!!.syncedAt)
@@ -66,7 +63,7 @@ class CatalogRepositoryTest {
         assertEquals(old, cache.snapshot); assertEquals(0, cache.saves)
         assertTrue(repository.state.value.failed)
         // Startup/retry also observes the persisted cooldown.
-        time += 1000; repository.refresh(); assertEquals(4, transport.requests.size)
+        time += 1000; repository.refresh(); assertEquals(8, transport.requests.size)
     }
     @Test fun completeEmptyResponseReplacesOldCatalog() = runTest {
         val cache = MemoryCache(fixtureSnapshot())

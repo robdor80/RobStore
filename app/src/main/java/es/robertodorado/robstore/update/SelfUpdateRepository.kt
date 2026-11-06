@@ -68,7 +68,7 @@ internal class SelfUpdateRepository(
                         (saved.candidate == null || (saved.candidate.channel == channel && saved.candidate.valid()))
                 }
             }
-            mutableState.value = state.value.copy(candidate = snapshot?.candidate, checkedAt = snapshot?.checkedAt ?: 0, nextCheckAt = nextAllowed())
+            mutableState.value = state.value.copy(candidate = snapshot?.candidate, checkedAt = snapshot?.checkedAt ?: 0, nextCheckAt = manualBlockedUntil())
         } finally { mutex.unlock() }
         if (snapshot == null || expired(snapshot!!.checkedAt)) check(manual = false)
     }
@@ -78,8 +78,10 @@ internal class SelfUpdateRepository(
         try {
             observeInstalled()
             val time = now()
-            if ((!manual && snapshot?.let { !expired(it.checkedAt) } == true) || time < nextAllowed()) {
-                mutableState.value = state.value.copy(nextCheckAt = nextAllowed(), message = "Espera al intervalo permitido; se respetan los límites de GitHub.")
+            val next = if (manual) manualBlockedUntil() else nextAllowed()
+            if ((!manual && snapshot?.let { !expired(it.checkedAt) } == true) || time < next) {
+                mutableState.value = state.value.copy(nextCheckAt = manualBlockedUntil(),
+                    message = if (time < manualBlockedUntil()) "GitHub limita las solicitudes. Inténtalo cuando permita otra comprobación." else null)
                 return@withContext
             }
             mutableState.value = state.value.copy(checking = true, message = null)
@@ -90,15 +92,16 @@ internal class SelfUpdateRepository(
                 cache.write("self-update-v1.json", catalogJson.encodeToString(fresh), 128 * 1024)
                 snapshot = fresh
                 mutableState.value = state.value.copy(candidate = candidate, checkedAt = time, checking = false,
-                    failed = false, message = null, nextCheckAt = nextAllowed())
+                    failed = false, message = null, nextCheckAt = manualBlockedUntil())
             } catch (_: InvalidMetadata) { failed("Información de actualización insuficiente o inconsistente.") }
             catch (_: IOException) { failed("No se pudo comprobar la actualización. Se conserva la última información conocida.") }
         } finally { mutex.unlock() }
     }
     private fun failed(message: String) {
-        mutableState.value = state.value.copy(checking = false, failed = true, message = message, nextCheckAt = nextAllowed())
+        mutableState.value = state.value.copy(checking = false, failed = true, message = message, nextCheckAt = manualBlockedUntil())
     }
-    private fun nextAllowed(): Long = maxOf(quota.readGate().blockedUntil, cache.readGate().lastAttemptAt.let {
+    private fun manualBlockedUntil(): Long = maxOf(quota.readGate().blockedUntil, cache.readGate().blockedUntil)
+    private fun nextAllowed(): Long = maxOf(manualBlockedUntil(), cache.readGate().lastAttemptAt.let {
         if (it > 0) it + CatalogPolicy.MANUAL_INTERVAL else 0
     })
     private fun expired(time: Long) = now() < time || now() - time >= CatalogPolicy.CACHE_TTL

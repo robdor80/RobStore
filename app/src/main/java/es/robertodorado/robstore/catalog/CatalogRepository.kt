@@ -8,7 +8,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.withContext
 
-/** No periodic work: refresh only at startup or on explicit user request. */
+/** The manual refresh is always available unless GitHub itself imposes a rate limit. */
 data class CatalogState(
     val snapshot: CatalogSnapshot? = null,
     val loading: Boolean = true,
@@ -38,7 +38,7 @@ internal class CatalogRepository(
                 if (initialized) return@withContext
                 val snapshot = cache.load()
                 mutableState.value = CatalogState(snapshot = snapshot, loading = false,
-                    stale = snapshot != null && expired(snapshot), nextRefreshAt = nextAllowed())
+                    stale = snapshot != null && expired(snapshot), nextRefreshAt = manualBlockedUntil())
                 initialized = true
             } finally { mutex.unlock() }
             if (mutableState.value.snapshot?.let { expired(it) } != false) refresh(manual = false)
@@ -49,13 +49,13 @@ internal class CatalogRepository(
         if (!mutex.tryLock()) return@withContext
         try {
             val time = now()
-            val next = nextAllowed()
+            val next = if (manual) manualBlockedUntil() else nextAllowed()
             if (next > time) {
                 val old = mutableState.value.snapshot
                 if (manual || old == null || expired(old)) mutableState.value = mutableState.value.copy(loading = false,
                     stale = old != null && expired(old), failed = old == null || mutableState.value.failed,
-                    message = "Aún no se permite otra comprobación. Intervalo mínimo: 5 minutos; se respetan los límites de GitHub.",
-                    nextRefreshAt = next)
+                    message = if (manual) "GitHub limita las solicitudes; espera hasta que permita otra comprobación." else "La comprobación automática se ha aplazado.",
+                    nextRefreshAt = manualBlockedUntil())
                 return@withContext
             }
             mutableState.value = mutableState.value.copy(loading = false, refreshing = true, message = null, failed = false)
@@ -63,18 +63,19 @@ internal class CatalogRepository(
                 cache.updateGate { it.copy(lastAttemptAt = time) }
                 val snapshot = discovery.fetch()
                 cache.save(snapshot)
-                mutableState.value = CatalogState(snapshot = snapshot, loading = false, nextRefreshAt = nextAllowed())
+                mutableState.value = CatalogState(snapshot = snapshot, loading = false, nextRefreshAt = manualBlockedUntil())
             } catch (failure: IOException) {
                 val old = mutableState.value.snapshot
                 mutableState.value = mutableState.value.copy(refreshing = false, loading = false,
                     stale = old != null && expired(old), failed = true,
                     message = failure.message ?: "No se pudo actualizar el catálogo. Comprueba la conexión.",
-                    nextRefreshAt = nextAllowed())
+                    nextRefreshAt = manualBlockedUntil())
             }
         } finally { mutex.unlock() }
     }
 
     private fun expired(snapshot: CatalogSnapshot): Boolean = now() < snapshot.syncedAt || now() - snapshot.syncedAt >= CatalogPolicy.CACHE_TTL
+    private fun manualBlockedUntil(): Long = cache.readGate().blockedUntil
     private fun nextAllowed(): Long = cache.readGate().let { gate ->
         // Wall-clock rollback must not trigger an uncontrolled refresh loop.
         maxOf(if (gate.lastAttemptAt > 0) gate.lastAttemptAt + CatalogPolicy.MANUAL_INTERVAL else 0, gate.blockedUntil)

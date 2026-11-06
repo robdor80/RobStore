@@ -21,7 +21,7 @@
     <string name="description">Descripción</string>
     <string name="changelog">Novedades</string>
     <string name="version_value">Versión disponible: %1$s</string>
-    <string name="refresh_policy">Caché válida durante 2 horas. Refresco manual cada 5 minutos como mínimo, sujeto a los límites de GitHub. Sin comprobaciones periódicas en segundo plano.</string>
+    <string name="refresh_policy">Caché válida durante 2 horas. El botón de refresco comprueba inmediatamente, salvo que GitHub limite las solicitudes. Sin comprobaciones periódicas en segundo plano.</string>
     <string name="refreshing">Actualizando catálogo…</string>
     <string name="last_sync">Última sincronización: %1$s</string>
     <string name="stale_cache">Caché desactualizada. Los datos pueden haber cambiado.</string>
