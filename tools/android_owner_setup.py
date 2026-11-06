@@ -132,8 +132,8 @@ def main():
     parser.add_argument('--catalog', action='store_true')
     args = parser.parse_args()
     require(re.fullmatch(r'robdor80/[A-Za-z0-9_.-]+', args.repository), 'Personal owner repository required')
-    require(gh_api('user')['login'] == 'robdor80', 'Configura una vez el acceso de GitHub del propietario')
     if args.environments_only:
+        require(gh_api('user')['login'] == 'robdor80', 'Configura una vez el acceso de GitHub del propietario')
         ensure_environments(args.repository)
         print('Entornos sin aprobaciones; claves conservadas.')
         return
@@ -146,6 +146,7 @@ def main():
             restore_backup(directory, Path(args.restore_backup).expanduser().resolve(), args.repository)
             print('Copia local recuperada sin modificar GitHub.')
         return
+    require(gh_api('user')['login'] == 'robdor80', 'Configura una vez el acceso de GitHub del propietario')
     # Existing complete setup is idempotent: no local keys, password prompts or secret writes.
     if configured(args.repository):
         ensure_environments(args.repository)
@@ -222,8 +223,10 @@ def import_key(source, destination, password, alias, expected=None):
     env = dict(os.environ, ANDROID_OWNER_SOURCE_PASSWORD=old_password, ANDROID_OWNER_KEY_PASSWORD=password)
     listing = command(['keytool', '-J-Duser.language=en', '-list', '-keystore', source,
                        '-storepass:env', 'ANDROID_OWNER_SOURCE_PASSWORD'], environment=env).decode()
-    aliases = re.findall(r'^([^,]+),.*PrivateKeyEntry', listing, re.M)
+    aliases = re.findall(r'^([^,\r\n]+),[^\r\n]*PrivateKeyEntry', listing, re.M)
+    require(aliases, 'El keystore no contiene una clave privada para firmar')
     old_alias = aliases[0] if len(aliases) == 1 else input('Alias de la clave que se importa: ').strip()
+    require(old_alias in aliases, 'El alias no identifica una clave privada del keystore')
     cert = command(['keytool', '-exportcert', '-keystore', source, '-alias', old_alias,
                     '-storepass:env', 'ANDROID_OWNER_SOURCE_PASSWORD'], environment=env)
     require(expected is None or hashlib.sha256(cert).hexdigest() == expected, 'El certificado no es el original; no importar')

@@ -277,11 +277,11 @@ class MobileSignedTests(unittest.TestCase):
         self.assertEqual(self.args.tag, 'v0.1.0')
 
     def test_wrong_keys_fail_certificate_verification(self):
-        for pin in (self.fixture.certificates[1],):
-            with patch.dict(os.environ, dict(self.env, CERTIFICATE_SHA256=pin)), self.assertRaises(ValueError):
+        for index, pin in enumerate((self.fixture.certificates[1], '00' * 32)):
+            self.args.directory = str(self.root / f'bad-key-{index}')
+            with self.subTest(pin=pin), patch.dict(os.environ, dict(self.env, CERTIFICATE_SHA256=pin)), \
+                    patch.object(m, 'increasing'), self.assertRaises(ValueError):
                 m.sign(self.args)
-        with patch.dict(os.environ, dict(self.env, CERTIFICATE_SHA256='00' * 32)), patch.object(m, 'increasing'), self.assertRaises(ValueError):
-            m.sign(self.args)
 
     def test_tampered_receipt_and_apk(self):
         self.sign()
