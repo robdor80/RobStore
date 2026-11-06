@@ -89,15 +89,3 @@ jobs:
             app/build/rs04-summary/
             app/build/rs04-evidence/
             app/build/rs04-dev/verificacion.md
-      - name: Upload installable RobStore DEV APK (trusted internal PR only)
-        if: success() && env.TRUSTED_INTERNAL_PR == 'true'
-        uses: actions/upload-artifact@v4
-        with:
-          name: robstore-dev-${{ github.event.pull_request.head.sha }}
-          retention-days: 30
-          if-no-files-found: error
-          path: |
-            app/build/rs04-dev/RobStore-DEV-*.apk
-            app/build/rs04-dev/SHA256SUMS
-            app/build/rs04-dev/firma-debug.txt
-            app/build/rs04-dev/verificacion.md
