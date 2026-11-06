@@ -298,7 +298,7 @@ class MobileSignedTests(unittest.TestCase):
     def test_automatic_sign_derives_tag_from_apk(self):
         self.args.tag = ''
         self.sign()
-        self.assertEqual(self.args.tag, 'v0.1.0-1')
+        self.assertEqual(self.args.tag, m.expected_tag(self.contract))
 
     def test_wrapped_base64_and_absent_alias_preserve_existing_signer(self):
         self.env['SIGNING_ALIAS'] = ''
