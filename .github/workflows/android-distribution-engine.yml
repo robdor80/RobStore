@@ -141,7 +141,7 @@ jobs:
           retention-days: 14
           if-no-files-found: error
   publish:
-    if: always() && needs.guard.result == 'success' && ((inputs.operation == 'distribute' && needs.sign.result == 'success') || inputs.operation == 'publish')
+    if: ${{ !cancelled() && needs.guard.result == 'success' && ((inputs.operation == 'distribute' && needs.sign.result == 'success') || inputs.operation == 'publish') }}
     needs: [guard, sign]
     env:
       RELEASE_TAG: ${{ needs.sign.outputs.tag || inputs.tag }}
