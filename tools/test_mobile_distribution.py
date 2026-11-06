@@ -111,7 +111,7 @@ class MobilePolicyTests(unittest.TestCase):
                 patch.object(m, 'api', side_effect=api), patch.object(m, 'protected_environment') as environment, \
                 patch.object(m, 'raw_file', side_effect=lambda repo, ref, path: Path('.github/android-distribution.json').read_text() if path == m.CONFIG else notes), patch.object(d, 'write'):
             m.guard(args)
-        self.assertEqual(environment.call_args_list, [unittest.mock.call(REPO, 'android-release'), unittest.mock.call(REPO, 'android-publish')])
+        environment.assert_not_called()  # Las publicaciones personales no requieren entornos previos.
 
     def test_guard_requires_current_main_without_another_authorization(self):
         self.guard_fixture()
