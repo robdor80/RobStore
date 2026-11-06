@@ -52,7 +52,9 @@ class SignedApkTests(unittest.TestCase):
         actual = d.inspect_apk(self.apk, 'release', self.certificates[0])
         d.validate_contract(actual, d.inspect_apk(self.apk, 'release', self.certificates[0]))
         self.assertEqual(actual['sha256'], d.digest(self.apk))
-        self.assertEqual(actual['versionCode'], 1)
+        version_line = next(line for line in Path('app/build.gradle.kts').read_text().splitlines()
+                            if line.strip().startswith('versionCode ='))
+        self.assertEqual(actual['versionCode'], int(version_line.split('=', 1)[1].strip()))
 
     def test_real_wrong_certificate(self):
         with self.assertRaisesRegex(ValueError, 'signer'):
