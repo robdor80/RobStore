@@ -108,7 +108,7 @@ def provision_signing_secrets(repo, name, values):
 def configured(repo):
     """Only secret names and public pins are read. Private values never leave GitHub."""
     names = {item['name'] for item in gh_api(f'repos/{repo}/environments')['environments']}
-    required = {'SIGNING_KEYSTORE_B64', 'SIGNING_STORE_PASSWORD', 'SIGNING_ALIAS'}
+    required = {'SIGNING_KEYSTORE_B64', 'SIGNING_STORE_PASSWORD'}
     if not {'android-release', 'android-dev', 'android-publish'} <= names:
         return False
     for channel in ('release', 'dev'):
@@ -203,7 +203,7 @@ def main():
     for channel in ('release', 'dev'):
         name = 'android-' + channel
         values = dict(SIGNING_KEYSTORE_B64=base64.b64encode((directory / (channel + '.p12')).read_bytes()).decode(),
-                      SIGNING_STORE_PASSWORD=settings[channel]['password'], SIGNING_ALIAS=settings[channel]['alias'])
+                      SIGNING_STORE_PASSWORD=settings[channel]['password'])
         provision_signing_secrets(args.repository, name, values)
         for key, value in dict(CERTIFICATE_SHA256=public['certificates'][channel]).items():
             command(['gh', 'variable', 'set', key, '--repo', args.repository, '--env', name, '--body', value])

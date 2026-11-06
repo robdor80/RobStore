@@ -2,10 +2,25 @@
 """Migración única de aplicaciones personales; nunca ejecuta distribuciones."""
 import argparse
 import base64
+import time
 from pathlib import Path
 import android_owner_setup as setup
 
 REPOSITORIES = ('robdor80/Cuadrante_App', 'robdor80/RobStore', 'robdor80/RobGit_App', 'robdor80/Rob_Apps')
+
+
+def wait_for_legacy_runs(repo, runs):
+    for run in runs:
+        deadline = time.monotonic() + 1200
+        cancelled = False
+        while run['status'] != 'completed':
+            if run['status'] in ('waiting', 'action_required') and not cancelled:
+                # Retire the old blocked order instead of requiring its human approval.
+                setup.gh_api(f"repos/{repo}/actions/runs/{run['id']}/cancel", 'POST')
+                cancelled = True
+            setup.require(time.monotonic() < deadline, repo + ': la ejecución anterior sigue activa; no se ha modificado su publicación')
+            time.sleep(2)
+            run = setup.gh_api(f"repos/{repo}/actions/runs/{run['id']}")
 
 
 def migrate(repo, check=False):
@@ -35,7 +50,7 @@ def migrate(repo, check=False):
     # Do not release a waiting run as a side effect of migration.
     if old:
         runs = setup.gh_api(f'repos/{repo}/actions/workflows/android-distribute.yml/runs?per_page=100')['workflow_runs']
-        setup.require(all(run['status'] == 'completed' for run in runs), repo + ': esperar a que termine la distribución activa')
+        wait_for_legacy_runs(repo, runs)
     setup.ensure_environments(repo)
     if changed:
         body = dict(message='RS-05: distribución automática con motor central', branch='main',

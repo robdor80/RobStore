@@ -276,7 +276,7 @@ class MobileSignedTests(unittest.TestCase):
         self.sign()
         self.assertEqual(self.args.tag, 'v0.1.0')
 
-    def test_wrong_key_and_shared_channel_pins(self):
+    def test_wrong_keys_fail_certificate_verification(self):
         for pin in (self.fixture.certificates[1],):
             with patch.dict(os.environ, dict(self.env, CERTIFICATE_SHA256=pin)), self.assertRaises(ValueError):
                 m.sign(self.args)

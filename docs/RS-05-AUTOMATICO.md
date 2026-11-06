@@ -45,7 +45,9 @@ python3 tools/android_owner_setup.py --repository robdor80/MiApp --catalog
 ```
 
 El asistente genera las claves y contraseñas automáticamente, guarda una copia
-local privada y configura GitHub. No pide repetir contraseñas ni escribir frases.
+local privada y configura GitHub. Las altas nuevas sólo necesitan dos secretos
+por canal: keystore y contraseña generada. El alias se calcula automáticamente;
+se respetan los alias y contraseñas privadas separados de las altas existentes. No pide repetir contraseñas ni escribir frases.
 Una segunda ejecución con el alta completa conserva las claves y no vuelve a
 pedir contraseñas ni subir keystores. Los secretos existentes no se sobrescriben.
 Termux es una posible herramienta de alta desde Android, no un requisito de
@@ -91,7 +93,9 @@ Procesa Cuadrante_App, RobStore, RobGit_App y Rob_Apps. Omite los proyectos que 
 no tienen RS-05 y podrán incorporarse con la plantilla nueva durante el alta.
 Actualiza una sola vez los wrappers, retira revisores y temporizadores de los tres
 entornos y elimina las dos variables obsoletas. No borra ni escribe secretos,
-keystores o certificados. No despacha workflows ni publica. `--check` muestra los
+keystores o certificados. No despacha workflows ni publica. Espera a que terminen las ejecuciones anteriores
+y cancela automáticamente las órdenes antiguas bloqueadas por revisores, antes de
+retirar esas barreras. `--check` muestra los
 cambios previstos sin escribir; `--repository owner/repo` limita la selección.
 No ejecutarlo de nuevo para cada actualización.
 
@@ -103,7 +107,8 @@ administrativos. Esto no añade un permiso o confirmación a cada publicación.
 ## RobPublisher Android
 
 La adaptación está en `robdor80/Rob_Apps`, basada en la rama de la aplicación de
-su PR #1 y coordinada con RobStore #12. Sustituye el formulario de etiquetas, la
+su PR #1. La adaptación está en [Rob_Apps #2](https://github.com/robdor80/Rob_Apps/pull/2),
+coordinada con [RobStore #12](https://github.com/robdor80/RobStore/pull/12). Sustituye el formulario de etiquetas, la
 revisión del candidato y la confirmación por un botón **Publicar actualización**.
 La pantalla muestra espera, compilación, firma, publicación y resultado. No muestra
 hashes, certificados o identificadores. Las capturas normales están permitidas;
@@ -138,3 +143,11 @@ actuales de Actions abran su keystore: ese diagnóstico sigue pendiente mientras
 no pueda ejecutarse con sus claves existentes. No se ha reejecutado una distribución
 ni publicado para intentar resolverlo. Las pruebas usan claves efímeras y respuestas
 HTTP simuladas. No declarar resuelto el fallo sólo por quitar aprobaciones.
+
+
+Comprobación adicional sin claves reales: se recompiló el commit exacto
+`e140bfa21ec1c51741d938849be43d6de06d2ff6` de la ejecución fallida. El motor pudo
+firmar y verificar ese APK (Cuadrante 1.0.1, código 2) con una clave efímera de prueba.
+Un fallo real provocado con contraseña de fixture incorrecta se identificó como
+`SIGNING_STORE_PASSWORD`, sin mostrar su valor. Esto valida el mecanismo y su
+diagnóstico, no las credenciales reales de Cuadrante ni la causa concreta del run antiguo.

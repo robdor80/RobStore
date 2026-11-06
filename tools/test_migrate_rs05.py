@@ -36,3 +36,9 @@ class MigrationTests(unittest.TestCase):
         self.assertIn('android-distribution-engine.yml@main', workflow)
         self.assertNotIn('tooling_sha', workflow)
         self.assertFalse(any('/secrets' in path or '/dispatches' in path or '/releases' in path for path, _, _ in calls))
+
+    def test_waiting_legacy_order_is_cancelled_without_requesting_approval(self):
+        with patch.object(m.setup, 'gh_api', return_value=dict(id=10, status='completed')) as api, patch.object(m.time, 'sleep'):
+            m.wait_for_legacy_runs('robdor80/Cuadrante_App', [dict(id=10, status='waiting')])
+        self.assertEqual(api.call_args_list[0].args, ('repos/robdor80/Cuadrante_App/actions/runs/10/cancel', 'POST'))
+        self.assertFalse(any('pending_deployments' in call.args[0] for call in api.call_args_list))

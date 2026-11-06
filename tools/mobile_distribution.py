@@ -254,6 +254,8 @@ def sign(args):
     certificate = d.fingerprint(os.environ['CERTIFICATE_SHA256'])
     historical_certificate(settings['repository'], args.channel, certificate)
     # Older setups may have a distinct key password; new PKCS12 keys need only one.
+    if not os.environ.get('SIGNING_ALIAS'):
+        os.environ['SIGNING_ALIAS'] = 'android-' + args.channel
     if not os.environ.get('SIGNING_KEY_PASSWORD'):
         os.environ['SIGNING_KEY_PASSWORD'] = os.environ.get('SIGNING_STORE_PASSWORD', '')
     encoded = os.environ['SIGNING_KEYSTORE_B64']
