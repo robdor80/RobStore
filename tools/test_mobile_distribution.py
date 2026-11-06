@@ -27,6 +27,7 @@ EVENT = dict(repository=dict(full_name=REPO, fork=False, default_branch='main'))
 class MobilePolicyTests(unittest.TestCase):
     def test_owner_explicit_dispatch(self):
         with patch.dict(os.environ, ENV):
+            m.identity(EVENT, REPO, SOURCE, 'distribute', 'release', '', '')
             m.identity(EVENT, REPO, SOURCE, 'prepare', 'release', 'v0.1.0', '')
             m.identity(EVENT, REPO, SOURCE, 'publish', 'release', 'v0.1.0', 'PUBLICAR v0.1.0')
 
@@ -44,17 +45,32 @@ class MobilePolicyTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 m.identity(dict(repository=dict(EVENT['repository'], fork=True)), REPO, SOURCE, 'prepare', 'release', 'v0.1.0', '')
 
-    def test_environment_requires_owner_and_only_main(self):
-        good = dict(protection_rules=[dict(type='required_reviewers', reviewers=[dict(type='User', reviewer=dict(login='robdor80'))])],
+    def test_environment_requires_no_approvals_and_only_main(self):
+        good = dict(protection_rules=[],
                     deployment_branch_policy=dict(custom_branch_policies=True, protected_branches=False))
         policies = dict(branch_policies=[dict(name='main', type='branch')])
         with patch.object(m, 'api', side_effect=[good, policies]):
             m.protected_environment(REPO, 'android-release')
-        for environment, branches in ((dict(good, protection_rules=[]), policies),
+        for environment, branches in ((dict(good, protection_rules=[dict(type='required_reviewers')]), policies),
+                                      (dict(good, protection_rules=[dict(type='wait_timer')]), policies),
                                       (good, dict(branch_policies=[dict(name='*', type='branch')])),
                                       (good, dict(branch_policies=[dict(name='main', type='tag')]))):
             with self.subTest(branches=branches), patch.object(m, 'api', side_effect=[environment, branches]), self.assertRaises(ValueError):
                 m.protected_environment(REPO, 'android-release')
+
+    def test_setup_creates_environments_without_approval_or_secret_writes(self):
+        calls = []
+        def api(path, method='GET', value=None):
+            calls.append((path, method, value))
+            return dict(environments=[]) if method == 'GET' else {}
+        with patch.object(owner_setup, 'gh_api', side_effect=api):
+            owner_setup.ensure_environments(REPO)
+        environments = [value for path, method, value in calls if method == 'PUT']
+        self.assertEqual(len(environments), 3)
+        for value in environments:
+            self.assertEqual(value['reviewers'], [])
+            self.assertEqual(value['wait_timer'], 0)
+        self.assertFalse(any('/secrets' in path or '/variables' in path for path, _, _ in calls))
 
     def test_setup_disabled_before_keys_or_api(self):
         with patch.dict(os.environ, dict(ENV, DISTRIBUTION_ENABLED='')), patch.object(m, 'api') as api:
@@ -91,6 +107,7 @@ class MobilePolicyTests(unittest.TestCase):
 
     def test_guard_requires_current_main_and_latest_ci(self):
         self.guard_fixture()
+        self.guard_fixture(operation='distribute', ci=None)
         for values in (dict(main='c' * 40), dict(ci='failure'), dict(ci=None)):
             with self.subTest(values=values), self.assertRaises(ValueError):
                 self.guard_fixture(**values)
@@ -155,7 +172,7 @@ class MobilePolicyTests(unittest.TestCase):
             candidate.assert_not_called()
             api.assert_not_called()
 
-    def publication_fixture(self, upload_fails=False):
+    def publication_fixture(self, upload_fails=False, operation='publish'):
         with tempfile.TemporaryDirectory(prefix='publish-api-fixture-') as folder:
             root = Path(folder)
             apk = root / 'Android-release.apk'; apk.write_bytes(b'API transaction fixture; not a production APK')
@@ -189,7 +206,7 @@ class MobilePolicyTests(unittest.TestCase):
                 raise AssertionError(path)
             def raw(repo, ref, path):
                 return json.dumps(contract) if path == d.CONTRACT else 'Approved fixture notes'
-            args = argparse.Namespace(config_output='fixture', source=SOURCE, tag='v0.1.0', channel='release', execute=True, directory=str(root))
+            args = argparse.Namespace(config_output='fixture', source=SOURCE, tag='v0.1.0', channel='release', execute=True, directory=str(root), operation=operation)
             with patch.dict(os.environ, dict(ENV, ANDROID_PUBLICATION_EXECUTE='owner-approved')), \
                     patch.object(m, 'guard'), patch.object(d, 'load', return_value=settings), \
                     patch.object(m, 'candidate', return_value=(contract, {}, apk)), patch.object(m, 'increasing'), \
@@ -209,6 +226,10 @@ class MobilePolicyTests(unittest.TestCase):
             self.assertTrue(next(data['draft'] for path, method, data in writes if path.endswith('/releases')))
             finalizations = [data for path, method, data in writes if method == 'PATCH']
             self.assertEqual(finalizations, [] if upload_fails else [dict(draft=False)])
+
+    def test_automatic_publication_transaction(self):
+        self.publication_fixture(operation='distribute')
+        self.publication_fixture(upload_fails=True, operation='distribute')
 
     def test_publication_transaction_without_rebuilding(self):
         self.publication_fixture()
@@ -255,6 +276,22 @@ class MobileSignedTests(unittest.TestCase):
             self.args.expected_sha256 = '00' * 32
             with self.assertRaises(ValueError):
                 m.candidate(self.args, self.settings)
+
+    def test_automatic_candidate_uses_current_run_without_user_hash(self):
+        self.sign()
+        self.args.operation = 'distribute'
+        self.args.expected_sha256 = ''
+        with patch.dict(os.environ, self.env):
+            m.candidate(self.args, self.settings)
+            self.args.candidate_run = '99999'
+            with self.assertRaises(ValueError):
+                m.candidate(self.args, self.settings)
+
+    def test_automatic_sign_derives_tag_from_apk(self):
+        self.args.operation = 'distribute'
+        self.args.tag = ''
+        self.sign()
+        self.assertEqual(self.args.tag, 'v0.1.0')
 
     def test_wrong_key_and_shared_channel_pins(self):
         for pin in (self.fixture.certificates[1],):

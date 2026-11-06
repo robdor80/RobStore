@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Reusable Android Actions pipeline. Signing never executes app/Gradle code.
-Publication is a separate, explicitly authorized operation; default is preparation.
+One explicit RobPublisher dispatch can build, sign and publish in the same run.
 """
 import argparse
 import base64
@@ -67,7 +67,7 @@ def config(data, repo):
 
 
 def identity(event, repo, source, operation, channel, tag, confirmation):
-    d.require(os.environ.get('GITHUB_EVENT_NAME') == 'workflow_dispatch', 'Only manual workflow_dispatch is allowed')
+    d.require(os.environ.get('GITHUB_EVENT_NAME') == 'workflow_dispatch', 'Only explicit workflow_dispatch is allowed')
     d.require(os.environ.get('GITHUB_REF') == 'refs/heads/main', 'Only main can distribute')
     d.require(os.environ.get('GITHUB_ACTOR') == OWNER and os.environ.get('GITHUB_TRIGGERING_ACTOR', OWNER) == OWNER,
               'Only the owner may dispatch or rerun distribution')
@@ -75,18 +75,17 @@ def identity(event, repo, source, operation, channel, tag, confirmation):
     d.require(re.fullmatch('[0-9a-f]{40}', source), 'Full source commit SHA required')
     d.require(event['repository']['full_name'] == repo and not event['repository']['fork'], 'Fork distribution forbidden')
     d.require(event['repository']['default_branch'] == 'main', 'Reviewed main branch required')
-    d.require(operation in ('prepare', 'publish') and channel in ('release', 'dev'), 'Invalid operation/channel')
+    d.require(operation in ('prepare', 'publish', 'distribute') and channel in ('release', 'dev'), 'Invalid operation/channel')
     pattern = r'v[0-9]+\.[0-9]+\.[0-9]+' if channel == 'release' else r'dev-[A-Za-z0-9][A-Za-z0-9._-]*'
-    d.require(re.fullmatch(pattern, tag), 'Unsafe channel tag')
+    d.require((operation == 'distribute' and not tag) or re.fullmatch(pattern, tag), 'Unsafe channel tag')
     if operation == 'publish':
         d.require(confirmation == 'PUBLICAR ' + tag, 'Explicit publication confirmation required')
 
 
 def protected_environment(repo, name):
     environment = api(f'repos/{repo}/environments/{name}')
-    reviews = [r for r in environment.get('protection_rules', []) if r['type'] == 'required_reviewers']
-    d.require(any(any(x['reviewer'].get('login') == OWNER and x['type'] == 'User'
-                      for x in r.get('reviewers', [])) for r in reviews), 'Owner environment review is mandatory')
+    d.require(not environment.get('protection_rules'),
+              'Remove environment approvals, wait timers and deployment protection rules; see docs/RS-05-AUTOMATICO.md')
     policy = environment.get('deployment_branch_policy') or {}
     d.require(policy.get('custom_branch_policies') is True and policy.get('protected_branches') is False,
               'Explicit environment main-only policy required')
@@ -106,11 +105,15 @@ def guard(args):
     identity(event, repo, args.source, args.operation, args.channel, args.tag, args.confirmation)
     main = api(f'repos/{repo}/branches/main')
     d.require(main['commit']['sha'] == args.source, 'Source must equal current reviewed main HEAD')
-    # Workflow approval is separate from the CI; both are required.
-    runs = api(f'repos/{repo}/actions/workflows/android.yml/runs?head_sha={args.source}&event=push&per_page=100')['workflow_runs']
-    matching = [r for r in runs if r['head_sha'] == args.source and r['head_branch'] == 'main' and r['head_repository']['full_name'] == repo]
-    d.require(matching and matching[0]['conclusion'] == 'success', 'Latest main Android CI must have succeeded')
-    protected_environment(repo, 'android-' + args.channel if args.operation == 'prepare' else 'android-publish')
+    # The complete operation validates tests/lint during its own unsigned build.
+    if args.operation != 'distribute':
+        runs = api(f'repos/{repo}/actions/workflows/android.yml/runs?head_sha={args.source}&event=push&per_page=100')['workflow_runs']
+        matching = [r for r in runs if r['head_sha'] == args.source and r['head_branch'] == 'main' and r['head_repository']['full_name'] == repo]
+        d.require(matching and matching[0]['conclusion'] == 'success', 'Latest main Android CI must have succeeded')
+    names = ('android-' + args.channel, 'android-publish') if args.operation == 'distribute' else (
+        'android-' + args.channel if args.operation == 'prepare' else 'android-publish',)
+    for name in names:
+        protected_environment(repo, name)
     settings = config(json.loads(raw_file(repo, args.source, CONFIG)), repo)
     notes = raw_file(repo, args.source, settings['notesPath'])
     d.require(0 < len(notes.strip()) <= 32000 and '<!-- NOT_FOR_PUBLICATION -->' not in notes,
@@ -124,7 +127,7 @@ def guard(args):
                   run['actor']['login'] == OWNER and run.get('triggering_actor', run['actor'])['login'] == OWNER and
                   run['path'] == '.github/workflows/android-distribute.yml', 'Untrusted prepared run')
     d.write(args.config_output, settings)
-    print('Owner, source, CI and protected environment: PASS; no keys accessed')
+    print('Owner, source and automatic environment policy: PASS; no keys accessed')
 
 
 def unsigned(args):
@@ -133,7 +136,8 @@ def unsigned(args):
     d.clean()
     variant = 'release' if args.channel == 'release' else 'debug'
     engine = Path(__file__).resolve().parent
-    d.run('./gradlew', f":{settings['module']}:assemble{variant.title()}", '-I', engine / 'unsigned-distribution.gradle',
+    d.run('./gradlew', f":{settings['module']}:test{variant.title()}UnitTest",
+          f":{settings['module']}:lint{variant.title()}", f":{settings['module']}:assemble{variant.title()}", '-I', engine / 'unsigned-distribution.gradle',
           '--no-daemon', '--no-configuration-cache', '--no-build-cache')
     d.clean()
     output = Path(args.directory)
@@ -287,6 +291,8 @@ def sign(args):
               '--v1-signing-enabled', 'false', '--v2-signing-enabled', 'true', '--out', apk, args.apk)
         contract = inspect(apk, args.channel, certificate, settings)
     # The directory above is gone before any artifact upload. No Gradle in this job.
+    if getattr(args, 'operation', '') == 'distribute' and not args.tag:
+        args.tag = expected_tag(contract)
     d.require(args.tag == expected_tag(contract), 'Tag must match real APK version')
     increasing(settings['repository'], contract)
     d.write(output / d.CONTRACT, contract)
@@ -294,11 +300,14 @@ def sign(args):
                                     certificateSha256=certificate, apkSha256=contract['sha256'],
                                     repository=settings['repository'], preparationRun=os.environ['GITHUB_RUN_ID'], tag=args.tag))
     (output / 'SHA256SUMS').write_text(f"{contract['sha256']}  {apk.name}\n")
-    print(json.dumps(dict(result='CANDIDATE ONLY', source=args.source, tag=args.tag, contract=contract), indent=2))
+    if os.environ.get('GITHUB_OUTPUT'):
+        with Path(os.environ['GITHUB_OUTPUT']).open('a') as stream:
+            stream.write(f'tag={args.tag}\n')
+    print(json.dumps(dict(result='SIGNED', source=args.source, tag=args.tag, contract=contract), indent=2))
     summary = os.environ.get('GITHUB_STEP_SUMMARY')
     if summary:
         with Path(summary).open('a') as stream:
-            stream.write(f"## Candidato firmado; publicación pendiente\n\nCommit: `{args.source}`\n\nTag: `{args.tag}`\n\nSHA-256 del APK: `{contract['sha256']}`\n\nRun de preparación: `{os.environ['GITHUB_RUN_ID']}`\n")
+            stream.write(f"## APK firmado y verificado\n\nCommit: `{args.source}`\n\nTag: `{args.tag}`\n\nSHA-256 del APK: `{contract['sha256']}`\n\nRun de preparación: `{os.environ['GITHUB_RUN_ID']}`\n")
 
 
 def candidate(args, settings):
@@ -311,7 +320,10 @@ def candidate(args, settings):
     historical_certificate(settings['repository'], args.channel, os.environ['CERTIFICATE_SHA256'])
     actual = inspect(apk, args.channel, os.environ['CERTIFICATE_SHA256'], settings)
     d.validate_contract(contract, actual)
-    d.require(contract['sha256'] == d.fingerprint(args.expected_sha256), 'Owner approved another APK hash')
+    if getattr(args, 'operation', '') == 'distribute':
+        d.require(args.candidate_run == os.environ.get('GITHUB_RUN_ID'), 'Automatic publication requires this run')
+    else:
+        d.require(contract['sha256'] == d.fingerprint(args.expected_sha256), 'Owner approved another APK hash')
     d.require(receipt == dict(schemaVersion=1, sourceCommit=args.source, channel=args.channel,
                              certificateSha256=d.fingerprint(os.environ['CERTIFICATE_SHA256']), apkSha256=contract['sha256'],
                              repository=settings['repository'], preparationRun=args.candidate_run, tag=args.tag), 'Candidate provenance mismatch')
@@ -392,7 +404,7 @@ def main():
         parser.add_argument('--' + name, default=default)
     parser.add_argument('--execute', action='store_true')
     args = parser.parse_args()
-    if args.command == 'publish':
+    if args.command == 'publish' and args.operation != 'distribute':
         args.operation = 'publish'
     globals()[args.command](args)
 

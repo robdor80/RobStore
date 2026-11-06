@@ -122,3 +122,10 @@ físicas pendientes, sin fusión ni publicación de Releases.
 
 Consulta [docs/RS-00.md](docs/RS-00.md) para las decisiones, el entorno Cloud y las
 validaciones de esta entrega.
+
+
+## Publicación desde RobPublisher
+
+[RS-05 automático](docs/RS-05-AUTOMATICO.md): una orden compila, firma con las
+identidades existentes y publica la Release. Incluye la migración única de los
+entornos actuales y el contrato mínimo del botón de RobPublisher.

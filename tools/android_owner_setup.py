@@ -121,6 +121,18 @@ def check_existing_identities(repo, public):
                 'Existing publication identity differs; never replace it')
 
 
+def ensure_environments(repo):
+    for name in ('android-release', 'android-dev', 'android-publish'):
+        listing = gh_api(f'repos/{repo}/environments')['environments']
+        if name not in [x['name'] for x in listing]:
+            gh_api(f'repos/{repo}/environments/{name}', 'PUT', dict(prevent_self_review=False, wait_timer=0,
+                   reviewers=[], deployment_branch_policy=dict(protected_branches=False, custom_branch_policies=True)))
+            gh_api(f'repos/{repo}/environments/{name}/deployment-branch-policies', 'POST', dict(name='main', type='branch'))
+        else:
+            from mobile_distribution import protected_environment
+            protected_environment(repo, name)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--repository', required=True)
@@ -202,16 +214,7 @@ def main():
     (directory / 'public-identities.json').write_text(json.dumps(public, indent=2) + '\n')
     encrypted_backup(directory, args.repository)
     require(input('Escribe CONFIGURAR GITHUB para guardar secretos en entornos protegidos: ') == 'CONFIGURAR GITHUB', 'Owner cancelled; keys remain only on Android')
-    owner = gh_api('users/robdor80')['id']
-    for name in ('android-release', 'android-dev', 'android-publish'):
-        listing = gh_api(f'repos/{args.repository}/environments')['environments']
-        if name not in [x['name'] for x in listing]:
-            gh_api(f'repos/{args.repository}/environments/{name}', 'PUT', dict(prevent_self_review=False,
-                   reviewers=[dict(type='User', id=owner)], deployment_branch_policy=dict(protected_branches=False, custom_branch_policies=True)))
-            gh_api(f'repos/{args.repository}/environments/{name}/deployment-branch-policies', 'POST', dict(name='main', type='branch'))
-        else:
-            from mobile_distribution import protected_environment
-            protected_environment(args.repository, name)
+    ensure_environments(args.repository)
     check_existing_identities(args.repository, public)
     command(['gh', 'variable', 'set', 'ANDROID_DISTRIBUTION_ENABLED', '--repo', args.repository, '--body', 'false'])
     for channel in ('release', 'dev'):
