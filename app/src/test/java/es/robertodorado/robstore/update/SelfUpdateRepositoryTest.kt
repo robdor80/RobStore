@@ -35,14 +35,13 @@ class SelfUpdateRepositoryTest {
         assertFalse(repository.state.value.enabled); assertFalse(repository.state.value.available)
         assertNull(repository.state.value.candidate); assertTrue(transport.requests.isEmpty())
     }
-    @Test fun automaticTtlAndManualIntervalSurviveProcessRestart() = runTest {
+    @Test fun manualUpdateCheckIsImmediateButAutomaticTtlSurvivesRestart() = runTest {
         val cache = FileCatalogCache(temp.newFolder())
         val dispatcher = StandardTestDispatcher(testScheduler)
         val first = repository(cache, dispatcher)
         first.initialize(); val count = transport.requests.size
-        first.initialize(); first.check(); assertEquals(count, transport.requests.size)
-        time += CatalogPolicy.MANUAL_INTERVAL
-        first.check(); assertTrue(transport.requests.size > count)
+        first.initialize(); first.check(); assertTrue(transport.requests.size > count)
+        assertEquals(0L, first.state.value.nextCheckAt)
         val afterManual = transport.requests.size
         repository(cache, dispatcher).initialize(); assertEquals(afterManual, transport.requests.size)
         time += CatalogPolicy.CACHE_TTL
