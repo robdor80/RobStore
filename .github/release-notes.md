@@ -1,5 +1,5 @@
-<!-- NOT_FOR_PUBLICATION -->
-Preparación de la infraestructura de distribución mobile-first de RobStore.
+# RobStore 0.1.1
 
-Este texto no autoriza una publicación. Antes de la primera versión real, el propietario
-debe aprobar la versión y sustituir estas notas en el commit fuente que vaya a distribuir.
+- Botón de actualización del catálogo sin esperas artificiales de cinco minutos.
+- Publicación y distribución de aplicaciones únicamente en versión oficial.
+- Conservación de la verificación de APK y de las confirmaciones que exija Android.
