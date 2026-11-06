@@ -39,3 +39,6 @@ secrets/
 *.jceks
 *-signing-backup*.tar.gpg
 **/__pycache__/
+
+# Local one-time signing setup metadata (contains generated passwords)
+signing.json

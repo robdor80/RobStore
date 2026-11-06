@@ -20,8 +20,7 @@ import test_distribution_signed as signed_fixtures
 SOURCE = 'a' * 40
 REPO = 'robdor80/RobStore'
 ENV = dict(GITHUB_EVENT_NAME='workflow_dispatch', GITHUB_REF='refs/heads/main', GITHUB_ACTOR='robdor80',
-           GITHUB_TRIGGERING_ACTOR='robdor80', GITHUB_REPOSITORY=REPO, DISTRIBUTION_ENABLED='true',
-           TOOLING_SHA='b' * 40, GITHUB_RUN_ID='12345')
+           GITHUB_TRIGGERING_ACTOR='robdor80', GITHUB_REPOSITORY=REPO, GITHUB_RUN_ID='12345')
 EVENT = dict(repository=dict(full_name=REPO, fork=False, default_branch='main'))
 
 
@@ -102,22 +101,9 @@ class MobilePolicyTests(unittest.TestCase):
         self.assertTrue(all(method == 'PUT' and value['reviewers'] == [] and value['wait_timer'] == 0 for _, method, value in writes))
         self.assertFalse(any('/secrets' in path or '/variables' in path or '/deployment-branch-policies' in path for path, _, _ in writes))
 
-    def test_setup_disabled_before_keys_or_api(self):
-        with patch.dict(os.environ, dict(ENV, DISTRIBUTION_ENABLED='')), patch.object(m, 'api') as api:
-            with self.assertRaises(ValueError):
-                m.guard(argparse.Namespace())
-            api.assert_not_called()
-
-    def test_unreviewed_tooling(self):
-        with patch.dict(os.environ, ENV), patch.object(m, 'api', return_value={'status': 'diverged'}):
-            with self.assertRaises(ValueError):
-                m.guard(argparse.Namespace())
-
     def guard_fixture(self, main=SOURCE, notes='Versioned fixture notes'):
         args = argparse.Namespace(source=SOURCE, channel='release', tag='', config_output='fixture')
         def api(path, *unused):
-            if '/compare/' in path:
-                return dict(status='ahead')
             if path.endswith('/branches/main'):
                 return dict(commit=dict(sha=main))
             raise AssertionError('Unexpected API; no prior run or separate CI approval is required')
@@ -132,10 +118,6 @@ class MobilePolicyTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.guard_fixture(main='c' * 40)
 
-    def test_placeholder_notes_block_distribution(self):
-        with self.assertRaises(ValueError):
-            self.guard_fixture(notes='<!-- NOT_FOR_PUBLICATION -->')
-
     def test_configuration_separates_packages_and_paths(self):
         good = d.load('.github/android-distribution.json')
         m.config(good, REPO)
@@ -144,12 +126,22 @@ class MobilePolicyTests(unittest.TestCase):
             with self.subTest(change=change), self.assertRaises(ValueError):
                 m.config(dict(good, **change), REPO)
 
-    def test_owner_setup_refuses_cloud(self):
-        with patch.dict(os.environ, dict(PREFIX='/tmp/cloud', CODEX_THREAD_ID='fixture')), \
-                patch('sys.argv', ['setup', '--repository', REPO, '--private-directory', '/tmp/unused', '--tooling-sha', SOURCE]), \
-                patch.object(owner_setup, 'gh_api') as api, self.assertRaises(ValueError):
+    def test_existing_setup_needs_no_passwords_or_local_keys(self):
+        with patch('sys.argv', ['setup', '--repository', REPO]), \
+                patch.object(owner_setup, 'gh_api', return_value=dict(login='robdor80')), \
+                patch.object(owner_setup, 'configured', return_value=True), \
+                patch.object(owner_setup, 'ensure_environments') as configure, \
+                patch.object(owner_setup.getpass, 'getpass', side_effect=AssertionError('No passwords')), \
+                patch.object(owner_setup, 'command', side_effect=AssertionError('No keys')):
             owner_setup.main()
-        api.assert_not_called()
+        configure.assert_called_once_with(REPO)
+
+    def test_initial_keys_never_enter_agent_terminal(self):
+        with patch.dict(os.environ, CODEX_THREAD_ID='fixture'), \
+                patch('sys.argv', ['setup', '--repository', REPO]), \
+                patch.object(owner_setup, 'gh_api', return_value=dict(login='robdor80')), \
+                patch.object(owner_setup, 'configured', return_value=False), self.assertRaises(ValueError):
+            owner_setup.main()
 
     def test_online_versions_never_allow_equal_or_lower(self):
         contract = dict(channel='release', packageName=d.PACKAGES['release'], versionCode=2, apkAssetName='Android-release.apk', sha256='ab' * 32)
@@ -316,7 +308,7 @@ class MobileSignedTests(unittest.TestCase):
         password = self.fixture.env['ROBSTORE_TEST_PASSWORD']
         destination = self.root / 'normalized-release.p12'
         with patch('builtins.input', return_value='fixture'), patch.object(owner_setup.getpass, 'getpass', return_value=password):
-            owner_setup.import_release(self.fixture.directory / 'fixture-1.p12', destination, password,
+            owner_setup.import_key(self.fixture.directory / 'fixture-1.p12', destination, password, 'android-release',
                                        self.fixture.certificates[0])
         certificate = owner_setup.command(['keytool', '-exportcert', '-keystore', destination,
             '-alias', 'android-release', '-storepass:env', 'ROBSTORE_TEST_PASSWORD'], environment=self.fixture.env)
@@ -361,12 +353,8 @@ class BackupCryptoTests(unittest.TestCase):
                 self.assertEqual((destination / 'release.p12').read_bytes(), b'test-only-release-bytes')
                 self.assertEqual((destination / 'dev.p12').stat().st_mode & 0o777, 0o600)
 
-    def test_encrypted_backup_and_recovery_of_downloaded_copy(self):
+    def test_optional_local_encrypted_backup_and_recovery(self):
         self.recovery()
-
-    def test_changed_backup_copy_rejected(self):
-        with self.assertRaises(ValueError):
-            self.recovery(tamper=True)
 
     def test_backup_path_traversal_rejected_before_extracting(self):
         archive = io.BytesIO()

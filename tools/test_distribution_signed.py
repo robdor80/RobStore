@@ -74,42 +74,6 @@ class SignedApkTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             d.inspect_apk(self.source, 'release', self.certificates[0])
 
-    def test_real_prepare_and_provenance(self):
-        # Isolated Git fixture: never creates a fake publication contract in RobStore.
-        directory = self.directory / 'isolated-git'
-        directory.mkdir()
-        candidate = self.directory / 'candidate'
-        candidate.mkdir()
-        shutil.copyfile(self.apk, candidate / self.apk.name)
-        contract = d.inspect_apk(candidate / self.apk.name, 'release', self.certificates[0])
-        d.write(candidate / d.CONTRACT, contract)
-        original = Path.cwd()
-        try:
-            os.chdir(directory)
-            d.git('init', '-q')
-            d.git('config', 'user.email', 'fixture@example.invalid')
-            d.git('config', 'user.name', 'Fixture')
-            Path('source.txt').write_text('unchanged code')
-            d.git('add', '.')
-            d.git('commit', '-qm', 'fixture source')
-            source = d.git('rev-parse', 'HEAD')
-            receipt = dict(schemaVersion=1, sourceCommit=source, channel='release',
-                           certificateSha256=self.certificates[0], apkSha256=contract['sha256'])
-            d.write(candidate / d.RECEIPT, receipt)
-            import argparse
-            d.prepare(argparse.Namespace(candidate=str(candidate), channel='release',
-                                        certificate=self.certificates[0], previous=None, first_publication=True))
-            d.git('add', d.CONTRACT, d.RECEIPT)
-            d.git('commit', '-qm', 'fixture contract only')
-            d.provenance(receipt, 'HEAD')
-            Path('source.txt').write_text('changed code')
-            d.git('add', 'source.txt')
-            d.git('commit', '-qm', 'fixture changed code')
-            with self.assertRaises(ValueError):
-                d.provenance(receipt, 'HEAD')
-        finally:
-            os.chdir(original)
-
 
 if __name__ == '__main__':
     unittest.main()

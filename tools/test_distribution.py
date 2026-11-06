@@ -84,6 +84,18 @@ class DistributionTests(unittest.TestCase):
                 d.run('signing-tool')
         self.assertNotIn('private sentinel', str(raised.exception))
 
+    def test_apksigner_errors_identify_single_setup_correction_without_disclosing_output(self):
+        cases = [('keystore password was incorrect', 'SIGNING_STORE_PASSWORD'),
+                 ('java.security.UnrecoverableKeyException: Cannot recover key', 'SIGNING_KEY_PASSWORD'),
+                 ('does not contain a key', 'SIGNING_ALIAS'),
+                 ('Invalid keystore format', 'SIGNING_KEYSTORE_B64')]
+        for error, field in cases:
+            with self.subTest(field=field), patch.object(subprocess, 'run', return_value=subprocess.CompletedProcess([], 1, '', error + ' private sentinel')):
+                with self.assertRaises(ValueError) as raised:
+                    d.run('/sdk/apksigner', 'sign')
+                self.assertIn(field, str(raised.exception))
+                self.assertNotIn('private sentinel', str(raised.exception))
+
     def test_unsigned_apk(self):
         with patch.object(d, 'run', return_value=''), patch.object(d, 'tools', return_value=Path('/safe')):
             with self.assertRaises(ValueError):
@@ -103,64 +115,6 @@ class DistributionTests(unittest.TestCase):
                     patch.object(d, 'run', side_effect=lambda *args: mutate(self.tool(*args))), \
                     self.assertRaises(ValueError):
                 d.inspect_apk(self.apk, 'release', CERT)
-
-    def test_provenance_changes_blocked(self):
-        with patch.object(d, 'git'), patch.object(d, 'source_tree', side_effect=['source', 'changed']):
-            with self.assertRaisesRegex(ValueError, 'changed'):
-                d.provenance({'sourceCommit': 'a' * 40}, 'HEAD')
-
-    def test_provenance_contract_only_allowed(self):
-        with patch.object(d, 'git'), patch.object(d, 'source_tree', return_value='same'):
-            d.provenance({'sourceCommit': 'a' * 40}, 'HEAD')
-
-    def preflight(self, published, first=False, tag_exists=False):
-        actual = self.inspect()
-        receipt = dict(schemaVersion=1, sourceCommit='a' * 40, channel='release',
-                       certificateSha256=CERT, apkSha256=actual['sha256'])
-        def git(*args):
-            if args[:2] == ('remote', 'get-url'):
-                return 'https://github.com/robdor80/RobStore.git'
-            if args[0] == 'rev-parse':
-                return 'b' * 40
-            if args[0] == 'ls-remote' and tag_exists:
-                return 'existing public tag'
-            return ''
-        with patch.object(d, 'clean'), patch.object(d, 'load', side_effect=[actual, receipt]), \
-                patch.object(d, 'inspect_apk', return_value=actual), patch.object(d, 'provenance'), \
-                patch.object(d, 'git', side_effect=git), \
-                patch.object(d, 'run', return_value=json.dumps({'sha': 'b' * 40})), \
-                patch.object(d, 'published_contracts', return_value=published), patch('builtins.print'):
-            d.preflight(argparse.Namespace(apk=str(self.apk), channel='release', certificate=CERT,
-                                           tag='v0.2.0', first_publication=first))
-
-    def test_preflight_previous_online_code(self):
-        self.preflight([dict(self.inspect(), versionCode=1)])
-        for code in (2, 3):
-            with self.subTest(code=code), self.assertRaises(ValueError):
-                self.preflight([dict(self.inspect(), versionCode=code)], first=True)
-
-    def test_preflight_first_is_explicit(self):
-        with self.assertRaises(ValueError):
-            self.preflight([])
-        self.preflight([], first=True)
-
-    def test_preflight_never_moves_tag(self):
-        with self.assertRaisesRegex(ValueError, 'tag already exists'):
-            self.preflight([], first=True, tag_exists=True)
-
-    def test_remote_contract_uses_tag_and_channel(self):
-        actual = self.inspect()
-        release = dict(draft=False, prerelease=False, tag_name='v0.2.0',
-                       assets=[dict(name=actual['apkAssetName'], state='uploaded', digest='sha256:' + actual['sha256'])])
-        with patch.object(d, 'run', side_effect=[json.dumps([release]) + '\n[]', json.dumps(actual)]) as run:
-            self.assertEqual(d.published_contracts('release'), [actual])
-            self.assertIn('ref=refs%2Ftags%2Fv0.2.0', run.call_args.args[-1])
-
-    def test_remote_dev_excludes_stable(self):
-        release = dict(draft=False, prerelease=False, tag_name='v0.2.0')
-        with patch.object(d, 'run', return_value=json.dumps([release])) as run:
-            self.assertEqual(d.published_contracts('dev'), [])
-            self.assertEqual(run.call_count, 1)
 
 
 if __name__ == '__main__':

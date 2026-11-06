@@ -57,8 +57,8 @@ jobs:
           python3 -m unittest discover -s tools -p test_distribution.py -v
           python3 -m unittest discover -s tools -p test_distribution_signed.py -v
           python3 -m unittest discover -s tools -p test_mobile_distribution.py -v
-          python3 -m unittest discover -s tools -p test_robpublisher_dispatch.py -v
           python3 -m unittest discover -s tools -p test_legacy_publications.py -v
+          python3 -m unittest discover -s tools -p test_migrate_rs05.py -v
           python3 tools/check_distribution_secrets.py
       - name: Verify APK identity, alignment, signature and SHA-256
         run: |

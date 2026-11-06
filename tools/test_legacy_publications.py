@@ -158,9 +158,9 @@ class LegacyTests(unittest.TestCase):
         with __import__('tempfile').TemporaryDirectory() as folder:
             source = Path(folder)/'old.jks'; source.write_bytes(b'fixture')
             with patch('builtins.input', return_value='old-alias'), patch.object(owner.getpass, 'getpass', return_value='fixture-only'), \
-                    patch.object(owner, 'command', return_value=b'another public certificate') as command, self.assertRaises(ValueError):
-                owner.import_release(source, Path(folder)/'release.p12', 'fixture-only', B['certificateSha256'])
-            self.assertEqual(len(command.call_args_list), 1)
+                    patch.object(owner, 'command', side_effect=[b'old-alias, date, PrivateKeyEntry', b'another public certificate']) as command, self.assertRaises(ValueError):
+                owner.import_key(source, Path(folder)/'release.p12', 'fixture-only', 'android-release', B['certificateSha256'])
+            self.assertEqual(len(command.call_args_list), 2)
             self.assertIn('-exportcert', command.call_args.args[0])
 
     def test_import_preserves_identity_and_passwords_not_argv(self):
@@ -168,9 +168,9 @@ class LegacyTests(unittest.TestCase):
             source = Path(folder)/'old.jks'; source.write_bytes(b'fixture')
             cert = b'public cert fixture'
             with patch('builtins.input', return_value='old-alias'), patch.object(owner.getpass, 'getpass', return_value='fixture-password'), \
-                    patch.object(owner, 'command', return_value=cert) as command:
-                owner.import_release(source, Path(folder)/'release.p12', 'new-fixture-password', __import__('hashlib').sha256(cert).hexdigest())
-            self.assertEqual(len(command.call_args_list), 2)
+                    patch.object(owner, 'command', side_effect=[b'old-alias, date, PrivateKeyEntry', cert, b'']) as command:
+                owner.import_key(source, Path(folder)/'release.p12', 'new-fixture-password', 'android-release', __import__('hashlib').sha256(cert).hexdigest())
+            self.assertEqual(len(command.call_args_list), 3)
             self.assertIn('-importkeystore', command.call_args.args[0])
             for call in command.call_args_list:
                 self.assertNotIn('fixture-password', call.args[0]); self.assertNotIn('new-fixture-password', call.args[0])
@@ -185,10 +185,11 @@ class LegacyTests(unittest.TestCase):
     def test_historical_repository_forbids_release_generation(self):
         def api(path):
             if path == 'user': return dict(login='robdor80')
-            if '/compare/' in path: return dict(status='ahead')
-            return dict(fork=False, default_branch='main', private=False)
-        with patch.dict(os.environ, dict(PREFIX='/data/data/com.termux/files/usr'), clear=True), \
-                patch('sys.argv', ['setup', '--repository', REPO, '--private-directory', '/tmp/unused', '--tooling-sha', 'a'*40]), \
+            return dict(environments=[])
+        with __import__('tempfile').TemporaryDirectory() as directory, \
+                patch.dict(os.environ, {}, clear=True), \
+                patch('sys.argv', ['setup', '--repository', REPO, '--private-directory', directory]), \
+                patch.object(owner, 'configured', return_value=False), \
                 patch.object(owner, 'gh_api', side_effect=api), patch.object(owner, 'command') as command, \
                 self.assertRaisesRegex(ValueError, 'generation is forbidden'):
             owner.main()

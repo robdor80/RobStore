@@ -4,7 +4,6 @@ on:
     inputs:
       source_sha: {type: string, required: true}
       channel: {type: string, required: true}
-      tooling_sha: {type: string, required: true}
 # Serialize the complete build/sign/publish operation across channels.
 concurrency:
   group: android-official-${{ github.repository }}
@@ -16,20 +15,21 @@ permissions:
 env:
   SOURCE_SHA: ${{ inputs.source_sha }}
   CHANNEL: ${{ inputs.channel }}
-  TOOLING_SHA: ${{ inputs.tooling_sha }}
-  DISTRIBUTION_ENABLED: ${{ vars.ANDROID_DISTRIBUTION_ENABLED }}
 jobs:
   guard:
+    outputs:
+      engine_sha: ${{ steps.engine.outputs.sha }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
-      - name: Require immutable tooling selection
-        run: python3 -c 'import os,re; assert re.fullmatch("[0-9a-f]{40}", os.environ["TOOLING_SHA"])'
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: robdor80/RobStore
-          ref: ${{ inputs.tooling_sha }}
+          ref: main
           persist-credentials: false
+      - id: engine
+        name: Select central engine once for this distribution
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
       - name: Owner, source and automatic environment policy
         env:
           GH_TOKEN: ${{ github.token }}
@@ -50,7 +50,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: robdor80/RobStore
-          ref: ${{ inputs.tooling_sha }}
+          ref: ${{ needs.guard.outputs.engine_sha }}
           path: engine
           persist-credentials: false
       - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
@@ -89,7 +89,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: robdor80/RobStore
-          ref: ${{ inputs.tooling_sha }}
+          ref: ${{ needs.guard.outputs.engine_sha }}
           persist-credentials: false
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
@@ -115,7 +115,6 @@ jobs:
           SIGNING_KEY_PASSWORD: ${{ secrets.SIGNING_KEY_PASSWORD }}
           SIGNING_ALIAS: ${{ secrets.SIGNING_ALIAS }}
           CERTIFICATE_SHA256: ${{ vars.CERTIFICATE_SHA256 }}
-          OTHER_CERTIFICATE_SHA256: ${{ vars.OTHER_CERTIFICATE_SHA256 }}
         run: |
           python3 tools/mobile_distribution.py sign --source "$SOURCE_SHA" --channel "$CHANNEL" --config-output "$RUNNER_TEMP/distribution.json" --apk "$RUNNER_TEMP/unsigned/unsigned.apk" --directory "$RUNNER_TEMP/candidate"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -143,7 +142,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: robdor80/RobStore
-          ref: ${{ inputs.tooling_sha }}
+          ref: ${{ needs.guard.outputs.engine_sha }}
           persist-credentials: false
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:

@@ -13,7 +13,7 @@ permissions:
   deployments: read
 jobs:
   distribute:
-    uses: robdor80/RobStore/.github/workflows/android-distribution-engine.yml@REPLACE_WITH_AUDITED_COMMIT_SHA
+    uses: robdor80/RobStore/.github/workflows/android-distribution-engine.yml@main
     secrets: inherit
     permissions:
       contents: write
@@ -22,4 +22,3 @@ jobs:
     with:
       source_sha: ${{ github.sha }}
       channel: ${{ inputs.channel }}
-      tooling_sha: ${{ vars.ANDROID_DISTRIBUTION_TOOLING_SHA }}

@@ -22,4 +22,3 @@ jobs:
     with:
       source_sha: ${{ github.sha }}
       channel: ${{ inputs.channel }}
-      tooling_sha: ${{ vars.ANDROID_DISTRIBUTION_TOOLING_SHA }}
