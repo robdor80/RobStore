@@ -30,6 +30,7 @@ permissions:
 jobs:
   distribute:
     uses: robdor80/RobStore/.github/workflows/android-distribution-engine.yml@REPLACE_WITH_AUDITED_COMMIT_SHA
+    secrets: inherit
     permissions:
       contents: write
       actions: read
