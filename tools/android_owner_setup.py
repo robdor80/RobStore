@@ -159,6 +159,10 @@ def main():
     from mobile_distribution import legacy_baselines
     historical = legacy_baselines(args.repository)
     existing = {item['name'] for item in gh_api(f'repos/{args.repository}/environments')['environments']}
+    releases = [] if historical else gh_api(f'repos/{args.repository}/releases?per_page=100')
+    distributed = {channel: any(not release['draft'] and release['prerelease'] == (channel == 'dev') and
+                    any(asset['name'].lower().endswith('.apk') for asset in release['assets']) for release in releases)
+                   for channel in ('release', 'dev')}
     metadata = directory / 'signing.json'
     public_file = directory / 'public-identities.json'
     public = json.loads(public_file.read_text()) if public_file.is_file() else dict(repository=args.repository, certificates={})
@@ -171,8 +175,8 @@ def main():
         imported = getattr(args, 'import_' + channel + '_keystore')
         require(not ('android-' + channel in existing and not store.exists() and not imported),
                 'Falta recuperar la clave existente de ' + channel + '; no se generará otra identidad')
-        if channel == 'release' and historical:
-            require(store.exists() or imported, 'Recupera o importa la Release original; generation is forbidden')
+        if (channel == 'release' and historical) or distributed[channel]:
+            require(store.exists() or imported, 'Recupera o importa la clave original; generation is forbidden')
         if channel not in settings:
             settings[channel] = dict(password=(getpass.getpass('Contraseña de la clave local recuperada de ' + channel + ': ')
                                                      if store.exists() else secrets.token_urlsafe(32)), alias='android-' + channel)

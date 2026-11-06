@@ -38,6 +38,14 @@ Las subidas se reintentan automáticamente. Un fallo persistente conserva un
 borrador; otra orden desde RobPublisher lo retoma sin borrar etiquetas o Releases
 a mano. Una versión ya pública se conserva y nunca se sobrescribe.
 
+La continuidad con aplicaciones anteriores se obtiene automáticamente del contrato
+más reciente o, durante la primera adopción de RS-05, de sus APK publicados. No se
+exigen registros de aprobación de Releases, IDs de assets, SHA de APK antiguos ni
+que la Release histórica permanezca para siempre en GitHub. Para Cuadrante se
+conservan únicamente su certificado original y su versión mínima conocida. Una
+aplicación que ya tiene APK publicados exige importar su clave existente en el alta;
+no se genera otra identidad por desconocer su historial.
+
 ## Alta inicial, una sola vez
 
 Preparar `.github/android-distribution.json`, la plantilla oficial del workflow y

@@ -21,7 +21,7 @@ CONFIG = '.github/android-distribution.json'
 CLOSURE_FILES = ('robstore-update.json', 'robstore-distribution.json', 'robstore.json', 'robstore/icon.png')
 
 
-def api(endpoint, method='GET', data=None, raw=False):
+def api(endpoint, method='GET', data=None, raw=False, missing_ok=False):
     command = ['gh', 'api', '--method', method]
     if raw:
         command += ['-H', 'Accept: application/vnd.github.raw+json']
@@ -29,6 +29,8 @@ def api(endpoint, method='GET', data=None, raw=False):
         command += ['--input', '-']
     result = subprocess.run(command + [endpoint], input=None if data is None else json.dumps(data),
                             text=True, capture_output=True)
+    if result.returncode and missing_ok and '(HTTP 404)' in result.stderr:
+        return None
     d.require(result.returncode == 0, 'GitHub API refused the operation; private details suppressed')
     return result.stdout if raw else json.loads(result.stdout or 'null')
 
@@ -44,8 +46,8 @@ def pages(endpoint):
     raise ValueError('GitHub pagination limit exceeded')
 
 
-def raw_file(repo, ref, path):
-    return api(f'repos/{repo}/contents/{path}?ref={quote(ref, safe="")}', raw=True)
+def raw_file(repo, ref, path, missing_ok=False):
+    return api(f'repos/{repo}/contents/{path}?ref={quote(ref, safe="")}', raw=True, missing_ok=missing_ok)
 
 
 def config(data, repo):
@@ -169,11 +171,11 @@ def inspect(apk, channel, certificate, settings):
 
 
 def legacy_baselines(repo):
-    # Trust only the registry shipped in the reviewed, SHA-pinned CENTRAL tooling.
-    registry = d.load(Path(__file__).with_name('approved-legacy-publications.json'))
+    # Original Android identities of applications distributed before RS-05.
+    registry = d.load(Path(__file__).with_name('android-original-identities.json'))
     d.require(registry['schemaVersion'] == 1, 'Unsupported legacy registry')
-    entries = registry['publications']
-    d.require(len({(b['repository'], b['tag']) for b in entries}) == len(entries), 'Duplicate legacy approvals')
+    entries = registry['applications']
+    d.require(len({(b['repository'], b['tag']) for b in entries}) == len(entries), 'Duplicate historical identities')
     return [b for b in entries if b['repository'] == repo]
 
 
@@ -184,66 +186,49 @@ def historical_certificate(repo, channel, certificate):
                       'Release identity must match the approved historical APK; never generate a replacement')
 
 
-def verified_legacy(repo, release, baseline):
-    """Read-only verification. No fallback on API errors, drafts or altered assets."""
-    b = baseline
-    d.require(repo == b['repository'] and release['tag_name'] == b['tag'] and
-              release['id'] == b['releaseId'] and release['draft'] is False and
-              release['prerelease'] is False and bool(release['published_at']) and
-              release['url'] == f"https://api.github.com/repos/{repo}/releases/{b['releaseId']}",
-              'Legacy approval does not match a published stable Release')
-    reference = api(f"repos/{repo}/git/ref/tags/{quote(b['tag'], safe='')}")
-    d.require(reference['object'] == dict(type='commit', sha=b['tagCommit'],
-              url=f"https://api.github.com/repos/{repo}/git/commits/{b['tagCommit']}"),
-              'Approved historical tag moved or changed type')
-    # Inspect the immutable tree; absence must be established by a successful API response.
-    listing = api(f"repos/{repo}/contents?ref={b['tagCommit']}")
-    d.require(isinstance(listing, list) and len(listing) < 1000, 'Invalid historical root listing')
-    if any(item['name'] == d.CONTRACT for item in listing):
-        return json.loads(raw_file(repo, b['tagCommit'], d.CONTRACT))
-    assets = [a for a in release['assets'] if a['name'] == b['apkAssetName']]
-    d.require(len(assets) == 1 and assets[0]['id'] == b['assetId'] and assets[0]['state'] == 'uploaded' and
-              assets[0].get('digest') == 'sha256:' + b['sha256'] and 0 < assets[0]['size'] <= 512 * 1024 * 1024,
-              'Approved legacy asset/digest mismatch (GitHub SHA-256 is mandatory)')
-    catalog = json.loads(raw_file(repo, b['tagCommit'], 'robstore.json'))
-    d.require(catalog['packageName'] == b['packageName'] and catalog['apkAssetName'] == b['apkAssetName'] and
-              all(catalog.get(k, b[k]) == b[k] for k in ('versionCode', 'versionName')),
-              'Legacy catalog identity/version mismatch')
-    with tempfile.TemporaryDirectory(prefix='verified-legacy-') as folder:
-        apk = Path(folder) / b['apkAssetName']
-        with apk.open('wb') as stream:
-            result = subprocess.run(['gh', 'api', '-H', 'Accept: application/octet-stream',
-                f"repos/{repo}/releases/assets/{b['assetId']}"], stdout=stream, stderr=subprocess.PIPE)
-        d.require(result.returncode == 0 and apk.stat().st_size == assets[0]['size'] and
-                  d.digest(apk) == b['sha256'], 'Downloaded historical APK differs from approved SHA-256')
-        settings = dict(repository=repo, robstorePolicy=False, packages=dict(release=b['packageName']),
-                        minSdk=b['minSdk'], targetSdk=b['targetSdk'])
-        actual = inspect(apk, 'release', b['certificateSha256'], settings)
-    expected = dict(schemaVersion=1, channel='release', **{k: b[k] for k in
-                    ('packageName', 'versionCode', 'versionName', 'apkAssetName', 'sha256')})
-    d.validate_contract(actual, expected)
-    print(f"Explicit legacy approval verified: {repo} {b['tag']} SHA-256 {b['sha256']}")
-    return actual
+def previous_apk(repo, release, contract):
+    """First RS-05 update of an existing app: derive compatibility from its APK, no manual registry."""
+    codes = []
+    for asset in release['assets']:
+        if not asset['name'].lower().endswith('.apk'):
+            continue
+        d.require(0 < asset['size'] <= 512 * 1024 * 1024, 'Previous APK size invalid')
+        with tempfile.TemporaryDirectory(prefix='previous-apk-') as folder:
+            apk = Path(folder) / 'previous.apk'
+            with apk.open('wb') as stream:
+                result = subprocess.run(['gh', 'api', '-H', 'Accept: application/octet-stream',
+                    f"repos/{repo}/releases/assets/{asset['id']}"], stdout=stream, stderr=subprocess.PIPE)
+            d.require(result.returncode == 0 and apk.stat().st_size == asset['size'], 'Previous APK download failed')
+            metadata = d.run(d.tools() / 'aapt', 'dump', 'badging', apk)
+            match = re.search(r"^package: name='([^']+)' versionCode='(\d+)'", metadata, re.M)
+            d.require(match is not None, 'Previous APK version unavailable')
+            if match[1] != contract['packageName']:
+                continue
+            signature = d.run(d.tools() / 'apksigner', 'verify', '--print-certs', apk)
+            verify_signer_output(signature, os.environ['CERTIFICATE_SHA256'])
+            codes.append(int(match[2]))
+    d.require(codes, 'Previous Release has no compatible APK; keep its original signing key')
+    return dict(channel=contract['channel'], packageName=contract['packageName'], versionCode=max(codes))
 
 
 def increasing(repo, contract):
-    releases = pages(f'repos/{repo}/releases')
     baselines = legacy_baselines(repo) if contract['channel'] == 'release' else []
     for baseline in baselines:
-        matches = [r for r in releases if r['tag_name'] == baseline['tag']]
-        d.require(len(matches) == 1 and matches[0]['draft'] is False and matches[0]['prerelease'] is False,
-                  'Approved legacy Release must remain present, published and stable')
         d.increasing(contract, dict(channel='release', packageName=baseline['packageName'], versionCode=baseline['versionCode']))
+    releases = [release for release in pages(f'repos/{repo}/releases')
+                if not release['draft'] and release['prerelease'] == (contract['channel'] == 'dev')]
+    # Once adopted, the latest RS-05 contract carries the growing Android versionCode.
+    releases.sort(key=lambda release: release.get('published_at') or '', reverse=True)
     for release in releases:
-        if release['draft'] or release['prerelease'] != (contract['channel'] == 'dev'):
-            continue
-        approved = [b for b in baselines if b['tag'] == release['tag_name']]
-        previous = (verified_legacy(repo, release, approved[0]) if approved else
-                    json.loads(raw_file(repo, 'refs/tags/' + release['tag_name'], d.CONTRACT)))
+        body = raw_file(repo, 'refs/tags/' + release['tag_name'], d.CONTRACT, missing_ok=True)
+        if body is not None:
+            d.increasing(contract, json.loads(body))
+            break
+        original = next((baseline for baseline in baselines if baseline['tag'] == release['tag_name']), None)
+        previous = (dict(channel='release', packageName=original['packageName'], versionCode=original['versionCode'])
+                    if original else previous_apk(repo, release, contract))
         d.increasing(contract, previous)
-        assets = [a for a in release['assets'] if a['name'] == previous['apkAssetName']]
-        d.require(len(assets) == 1 and assets[0]['state'] == 'uploaded' and
-                  assets[0].get('digest') in (None, 'sha256:' + previous['sha256']), 'Previous official asset inconsistent')
+        # Before the first RS-05 contract, check all old APK versions automatically.
 
 
 def expected_tag(contract):

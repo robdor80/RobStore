@@ -2,7 +2,7 @@
 
 La Release original v1.0.0 usa el paquete `es.robertodorado.cuadrante` y el
 certificado SHA-256 `c85a092878e85a35b8ca84132bdf00314da3e90dae80fc137ac52a27d11491e7`.
-El registro técnico está en `tools/approved-legacy-publications.json`.
+El registro técnico está en `tools/android-original-identities.json`.
 Se conserva esta identidad; no generar ni sustituir su clave Release.
 
 El procedimiento vigente de importación inicial, migración y actualización es
