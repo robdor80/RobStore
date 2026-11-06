@@ -69,7 +69,7 @@ internal class CatalogRepository(
                 mutableState.value = mutableState.value.copy(refreshing = false, loading = false,
                     stale = old != null && expired(old), failed = true,
                     message = failure.message ?: "No se pudo actualizar el catálogo. Comprueba la conexión.",
-                    nextRefreshAt = nextAllowed())
+                    nextRefreshAt = manualBlockedUntil())
             }
         } finally { mutex.unlock() }
     }
