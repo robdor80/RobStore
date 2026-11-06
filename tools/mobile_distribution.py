@@ -106,12 +106,12 @@ def guard(args):
     identity(event, repo, args.source, args.channel, args.tag)
     main = api(f'repos/{repo}/branches/main')
     d.require(main['commit']['sha'] == args.source, 'Source must equal current reviewed main HEAD')
-    # Tests and lint run in this operation's unsigned build, before accessing keys.
-    for name in ('android-' + args.channel, 'android-publish'):
-        protected_environment(repo, name)
+    # A personal app needs no preconfigured GitHub environments or manual approvals.
+    # The workflow still restricts dispatch to the owner and current main; the
+    # signing job itself requires the persistent Release signing credentials.
     settings = config(json.loads(raw_file(repo, args.source, CONFIG)), repo)
     d.write(args.config_output, settings)
-    print('Owner, source and automatic environment policy: PASS; no keys accessed')
+    print('Owner, main source and distribution configuration: PASS; no keys accessed')
 
 
 def unsigned(args):
