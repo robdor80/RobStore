@@ -66,7 +66,7 @@ def config(data, repo):
     return data
 
 
-def identity(event, repo, source, operation, channel, tag, confirmation):
+def identity(event, repo, source, channel, tag=''):
     d.require(os.environ.get('GITHUB_EVENT_NAME') == 'workflow_dispatch', 'Only explicit workflow_dispatch is allowed')
     d.require(os.environ.get('GITHUB_REF') == 'refs/heads/main', 'Only main can distribute')
     d.require(os.environ.get('GITHUB_ACTOR') == OWNER and os.environ.get('GITHUB_TRIGGERING_ACTOR', OWNER) == OWNER,
@@ -74,17 +74,20 @@ def identity(event, repo, source, operation, channel, tag, confirmation):
     d.require(repo.startswith(OWNER + '/') and os.environ.get('GITHUB_REPOSITORY') == repo, 'Wrong repository')
     d.require(re.fullmatch('[0-9a-f]{40}', source), 'Full source commit SHA required')
     d.require(event['repository']['full_name'] == repo and not event['repository']['fork'], 'Fork distribution forbidden')
-    d.require(event['repository']['default_branch'] == 'main', 'Reviewed main branch required')
-    d.require(operation in ('prepare', 'publish', 'distribute') and channel in ('release', 'dev'), 'Invalid operation/channel')
+    d.require(event['repository']['default_branch'] == 'main', 'Main branch required')
+    d.require(channel in ('release', 'dev'), 'Invalid channel')
+    if tag:
+        validate_tag(channel, tag)
+
+
+def validate_tag(channel, tag):
     pattern = r'v[0-9]+\.[0-9]+\.[0-9]+' if channel == 'release' else r'dev-[A-Za-z0-9][A-Za-z0-9._-]*'
-    d.require((operation == 'distribute' and not tag) or re.fullmatch(pattern, tag), 'Unsafe channel tag')
-    if operation == 'publish':
-        d.require(confirmation == 'PUBLICAR ' + tag, 'Explicit publication confirmation required')
+    d.require(re.fullmatch(pattern, tag), 'Unsafe channel tag')
 
 
 def protected_environment(repo, name):
     environment = api(f'repos/{repo}/environments/{name}')
-    d.require(not environment.get('protection_rules'),
+    d.require(all(rule['type'] == 'branch_policy' for rule in environment.get('protection_rules', [])),
               'Remove environment approvals, wait timers and deployment protection rules; see docs/RS-05-AUTOMATICO.md')
     policy = environment.get('deployment_branch_policy') or {}
     d.require(policy.get('custom_branch_policies') is True and policy.get('protected_branches') is False,
@@ -102,30 +105,16 @@ def guard(args):
     d.require(reviewed['status'] in ('ahead', 'identical'), 'Tooling must belong to reviewed central main history')
     event = d.load(os.environ['GITHUB_EVENT_PATH'])
     repo = os.environ['GITHUB_REPOSITORY']
-    identity(event, repo, args.source, args.operation, args.channel, args.tag, args.confirmation)
+    identity(event, repo, args.source, args.channel, args.tag)
     main = api(f'repos/{repo}/branches/main')
     d.require(main['commit']['sha'] == args.source, 'Source must equal current reviewed main HEAD')
-    # The complete operation validates tests/lint during its own unsigned build.
-    if args.operation != 'distribute':
-        runs = api(f'repos/{repo}/actions/workflows/android.yml/runs?head_sha={args.source}&event=push&per_page=100')['workflow_runs']
-        matching = [r for r in runs if r['head_sha'] == args.source and r['head_branch'] == 'main' and r['head_repository']['full_name'] == repo]
-        d.require(matching and matching[0]['conclusion'] == 'success', 'Latest main Android CI must have succeeded')
-    names = ('android-' + args.channel, 'android-publish') if args.operation == 'distribute' else (
-        'android-' + args.channel if args.operation == 'prepare' else 'android-publish',)
-    for name in names:
+    # Tests and lint run in this operation's unsigned build, before accessing keys.
+    for name in ('android-' + args.channel, 'android-publish'):
         protected_environment(repo, name)
     settings = config(json.loads(raw_file(repo, args.source, CONFIG)), repo)
     notes = raw_file(repo, args.source, settings['notesPath'])
     d.require(0 < len(notes.strip()) <= 32000 and '<!-- NOT_FOR_PUBLICATION -->' not in notes,
-              'Approve real versioned release notes before preparing a candidate')
-    if args.operation == 'publish':
-        d.fingerprint(args.expected_sha256)
-        d.require(args.candidate_run.isdecimal() and int(args.candidate_run) > 0, 'Prepared run ID required')
-        run = api(f'repos/{repo}/actions/runs/{args.candidate_run}')
-        d.require(run['conclusion'] == 'success' and run['event'] == 'workflow_dispatch' and
-                  run['head_sha'] == args.source and run['head_branch'] == 'main' and
-                  run['actor']['login'] == OWNER and run.get('triggering_actor', run['actor'])['login'] == OWNER and
-                  run['path'] == '.github/workflows/android-distribute.yml', 'Untrusted prepared run')
+              'Versioned release notes are missing or contain a placeholder')
     d.write(args.config_output, settings)
     print('Owner, source and automatic environment policy: PASS; no keys accessed')
 
@@ -291,9 +280,8 @@ def sign(args):
               '--v1-signing-enabled', 'false', '--v2-signing-enabled', 'true', '--out', apk, args.apk)
         contract = inspect(apk, args.channel, certificate, settings)
     # The directory above is gone before any artifact upload. No Gradle in this job.
-    if getattr(args, 'operation', '') == 'distribute' and not args.tag:
-        args.tag = expected_tag(contract)
-    d.require(args.tag == expected_tag(contract), 'Tag must match real APK version')
+    args.tag = expected_tag(contract)
+    validate_tag(args.channel, args.tag)
     increasing(settings['repository'], contract)
     d.write(output / d.CONTRACT, contract)
     d.write(output / d.RECEIPT, dict(schemaVersion=1, sourceCommit=args.source, channel=args.channel,
@@ -320,13 +308,11 @@ def candidate(args, settings):
     historical_certificate(settings['repository'], args.channel, os.environ['CERTIFICATE_SHA256'])
     actual = inspect(apk, args.channel, os.environ['CERTIFICATE_SHA256'], settings)
     d.validate_contract(contract, actual)
-    if getattr(args, 'operation', '') == 'distribute':
-        d.require(args.candidate_run == os.environ.get('GITHUB_RUN_ID'), 'Automatic publication requires this run')
-    else:
-        d.require(contract['sha256'] == d.fingerprint(args.expected_sha256), 'Owner approved another APK hash')
+    run = os.environ.get('GITHUB_RUN_ID', '')
+    d.require(run.isdecimal() and int(run) > 0, 'Current Actions run required')
     d.require(receipt == dict(schemaVersion=1, sourceCommit=args.source, channel=args.channel,
                              certificateSha256=d.fingerprint(os.environ['CERTIFICATE_SHA256']), apkSha256=contract['sha256'],
-                             repository=settings['repository'], preparationRun=args.candidate_run, tag=args.tag), 'Candidate provenance mismatch')
+                             repository=settings['repository'], preparationRun=run, tag=args.tag), 'Candidate provenance mismatch')
     d.require(args.tag == expected_tag(contract), 'Wrong publication tag')
     d.require((directory / 'SHA256SUMS').read_text() == f"{contract['sha256']}  {apk.name}\n", 'Checksum manifest mismatch')
     return contract, receipt, apk
@@ -358,13 +344,12 @@ def publish(args):
     d.require(args.tag not in [b['name'] for b in pages(f'repos/{repo}/branches')], 'Tag name collides with a branch')
     d.require(not any(r['tag_name'] == args.tag for r in pages(f'repos/{repo}/releases')), 'Release/tag already used, including draft')
     notes = raw_file(repo, args.source, settings['notesPath'])
-    d.require(0 < len(notes.strip()) <= 32000 and '<!-- NOT_FOR_PUBLICATION -->' not in notes, 'Approved versioned release notes required')
+    d.require(0 < len(notes.strip()) <= 32000 and '<!-- NOT_FOR_PUBLICATION -->' not in notes, 'Versioned release notes required')
     files = publication_files(settings, args.source, contract, receipt)
     d.require(set(files).issubset(CLOSURE_FILES), 'Only publication closure files may change')
     if not args.execute:
         print('DRY PLAN: validated candidate; no commit, tag, Release or upload created')
         return
-    d.require(os.environ.get('ANDROID_PUBLICATION_EXECUTE') == 'owner-approved', 'Publication execution not enabled')
     source = api(f'repos/{repo}/git/commits/{args.source}')
     entries = []
     for name, body in files.items():
@@ -398,14 +383,11 @@ def publish(args):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('command', choices=('guard', 'unsigned', 'sign', 'publish'))
-    for name, default in [('source', ''), ('operation', 'prepare'), ('channel', 'release'), ('tag', ''),
-                          ('confirmation', ''), ('candidate-run', ''), ('expected-sha256', ''),
+    for name, default in [('source', ''), ('channel', 'release'), ('tag', ''),
                           ('config-output', ''), ('directory', ''), ('apk', '')]:
         parser.add_argument('--' + name, default=default)
     parser.add_argument('--execute', action='store_true')
     args = parser.parse_args()
-    if args.command == 'publish' and args.operation != 'distribute':
-        args.operation = 'publish'
     globals()[args.command](args)
 
 

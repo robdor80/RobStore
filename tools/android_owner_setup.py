@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
-"""OWNER ONLY on Android/Termux: one-time keys, encrypted Drive backup and GitHub environments.
-Never run in Codex Cloud, CI or an AI-controlled terminal. This file contains no owner secrets.
+"""Initial key setup/recovery is OWNER ONLY in Android/Termux, never Cloud/CI/Codex.
+--environments-only migrates deployment policy anywhere without accessing keys or passwords.
+Updates run entirely in Actions; this assistant is never part of publication.
 """
 import argparse
 import base64
@@ -122,22 +123,32 @@ def check_existing_identities(repo, public):
 
 
 def ensure_environments(repo):
+    existing = {x['name'] for x in gh_api(f'repos/{repo}/environments')['environments']}
     for name in ('android-release', 'android-dev', 'android-publish'):
-        listing = gh_api(f'repos/{repo}/environments')['environments']
-        if name not in [x['name'] for x in listing]:
-            gh_api(f'repos/{repo}/environments/{name}', 'PUT', dict(prevent_self_review=False, wait_timer=0,
-                   reviewers=[], deployment_branch_policy=dict(protected_branches=False, custom_branch_policies=True)))
+        # Updating environment protection preserves secrets, variables and branch rules.
+        gh_api(f'repos/{repo}/environments/{name}', 'PUT', dict(prevent_self_review=False, wait_timer=0,
+               reviewers=[], deployment_branch_policy=dict(protected_branches=False, custom_branch_policies=True)))
+        if name not in existing:
             gh_api(f'repos/{repo}/environments/{name}/deployment-branch-policies', 'POST', dict(name='main', type='branch'))
-        else:
-            from mobile_distribution import protected_environment
-            protected_environment(repo, name)
+        from mobile_distribution import protected_environment
+        protected_environment(repo, name)
+
+
+def provision_signing_secrets(repo, name, values):
+    existing = {entry['name'] for entry in gh_api(f'repos/{repo}/environments/{name}/secrets')['secrets']}
+    # Initial setup/recovery only: never overwrite an already configured signing secret.
+    for key, value in values.items():
+        if key not in existing:
+            command(['gh', 'secret', 'set', key, '--repo', repo, '--env', name], value.encode())
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--repository', required=True)
-    parser.add_argument('--private-directory', required=True)
-    parser.add_argument('--tooling-sha', required=True)
+    parser.add_argument('--private-directory')
+    parser.add_argument('--tooling-sha')
+    parser.add_argument('--environments-only', action='store_true',
+                        help='One-time approval migration; no keystores, passwords or secret writes')
     recovery = parser.add_mutually_exclusive_group()
     recovery.add_argument('--resume', action='store_true', help='Recover interrupted setup using the same identities; never regenerate keys')
     recovery.add_argument('--restore-backup', help='Restore encrypted Drive backup into a new private directory; never regenerate keys')
@@ -145,6 +156,13 @@ def main():
     parser.add_argument('--legacy-tag', help='Exact historical tag in the reviewed central approval registry')
     parser.add_argument('--catalog', action='store_true', help='Add robstore-app without removing existing topics; repository must already be public')
     args = parser.parse_args()
+    if args.environments_only:
+        require(re.fullmatch(r'robdor80/[A-Za-z0-9_.-]+', args.repository), 'Personal owner repository required')
+        require(gh_api('user')['login'] == 'robdor80', 'Owner session required')
+        ensure_environments(args.repository)
+        print('Entornos sin aprobaciones; secretos e identidades conservados. Publica desde RobPublisher.')
+        return
+    require(args.private_directory and args.tooling_sha, 'Initial setup requires private directory and tooling SHA')
     require('com.termux' in os.environ.get('PREFIX', '') and not os.environ.get('CI') and not os.environ.get('CODEX_THREAD_ID'),
             'Run personally in Android Termux, never Cloud/CI/Codex')
     os.umask(0o077)
@@ -221,8 +239,7 @@ def main():
         name = 'android-' + channel
         values = dict(SIGNING_KEYSTORE_B64=base64.b64encode((directory / (channel + '.p12')).read_bytes()).decode(),
                       SIGNING_STORE_PASSWORD=passwords[channel], SIGNING_KEY_PASSWORD=passwords[channel], SIGNING_ALIAS='android-' + channel)
-        for key, value in values.items():
-            command(['gh', 'secret', 'set', key, '--repo', args.repository, '--env', name], value.encode())
+        provision_signing_secrets(args.repository, name, values)
         for key, value in dict(CERTIFICATE_SHA256=public['certificates'][channel],
                                OTHER_CERTIFICATE_SHA256=public['certificates']['dev' if channel == 'release' else 'release']).items():
             command(['gh', 'variable', 'set', key, '--repo', args.repository, '--env', name, '--body', value])
@@ -234,7 +251,7 @@ def main():
         topics = gh_api(f'repos/{args.repository}/topics')['names']
         gh_api(f'repos/{args.repository}/topics', 'PUT', dict(names=sorted(set(topics + ['robstore-app']))))
     print('Configuración completada; no se ha ejecutado ningún workflow ni publicado nada.')
-    print('Conserva claves y contraseñas; respalda también la recuperación del gestor fuera del móvil.')
+    print('Alta inicial completada. Las actualizaciones se publican desde RobPublisher sin Termux ni contraseñas.')
 
 
 if __name__ == '__main__':

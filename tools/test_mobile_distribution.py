@@ -20,33 +20,35 @@ import test_distribution_signed as signed_fixtures
 SOURCE = 'a' * 40
 REPO = 'robdor80/RobStore'
 ENV = dict(GITHUB_EVENT_NAME='workflow_dispatch', GITHUB_REF='refs/heads/main', GITHUB_ACTOR='robdor80',
-           GITHUB_TRIGGERING_ACTOR='robdor80', GITHUB_REPOSITORY=REPO, DISTRIBUTION_ENABLED='true', TOOLING_SHA='b' * 40)
+           GITHUB_TRIGGERING_ACTOR='robdor80', GITHUB_REPOSITORY=REPO, DISTRIBUTION_ENABLED='true',
+           TOOLING_SHA='b' * 40, GITHUB_RUN_ID='12345')
 EVENT = dict(repository=dict(full_name=REPO, fork=False, default_branch='main'))
 
 
 class MobilePolicyTests(unittest.TestCase):
     def test_owner_explicit_dispatch(self):
         with patch.dict(os.environ, ENV):
-            m.identity(EVENT, REPO, SOURCE, 'distribute', 'release', '', '')
-            m.identity(EVENT, REPO, SOURCE, 'prepare', 'release', 'v0.1.0', '')
-            m.identity(EVENT, REPO, SOURCE, 'publish', 'release', 'v0.1.0', 'PUBLICAR v0.1.0')
+            m.identity(EVENT, REPO, SOURCE, 'release')
+            m.identity(EVENT, REPO, SOURCE, 'dev')
 
     def test_unauthorized_events_branches_actors(self):
         for change in (dict(GITHUB_EVENT_NAME='push'), dict(GITHUB_EVENT_NAME='pull_request_target'),
                        dict(GITHUB_REF='refs/heads/feature'), dict(GITHUB_REF='refs/tags/v0.1.0'),
                        dict(GITHUB_ACTOR='someone'), dict(GITHUB_TRIGGERING_ACTOR='someone')):
             with self.subTest(change=change), patch.dict(os.environ, dict(ENV, **change)), self.assertRaises(ValueError):
-                m.identity(EVENT, REPO, SOURCE, 'prepare', 'release', 'v0.1.0', '')
+                m.identity(EVENT, REPO, SOURCE, 'release')
 
-    def test_confirmation_and_forks(self):
+    def test_invalid_channels_tags_and_forks(self):
         with patch.dict(os.environ, ENV):
             with self.assertRaises(ValueError):
-                m.identity(EVENT, REPO, SOURCE, 'publish', 'release', 'v0.1.0', '')
+                m.identity(EVENT, REPO, SOURCE, 'other')
             with self.assertRaises(ValueError):
-                m.identity(dict(repository=dict(EVENT['repository'], fork=True)), REPO, SOURCE, 'prepare', 'release', 'v0.1.0', '')
+                m.identity(EVENT, REPO, SOURCE, 'release', 'unsafe tag')
+            with self.assertRaises(ValueError):
+                m.identity(dict(repository=dict(EVENT['repository'], fork=True)), REPO, SOURCE, 'release')
 
     def test_environment_requires_no_approvals_and_only_main(self):
-        good = dict(protection_rules=[],
+        good = dict(protection_rules=[dict(type='branch_policy')],
                     deployment_branch_policy=dict(custom_branch_policies=True, protected_branches=False))
         policies = dict(branch_policies=[dict(name='main', type='branch')])
         with patch.object(m, 'api', side_effect=[good, policies]):
@@ -63,7 +65,7 @@ class MobilePolicyTests(unittest.TestCase):
         def api(path, method='GET', value=None):
             calls.append((path, method, value))
             return dict(environments=[]) if method == 'GET' else {}
-        with patch.object(owner_setup, 'gh_api', side_effect=api):
+        with patch.object(owner_setup, 'gh_api', side_effect=api), patch.object(m, 'protected_environment'):
             owner_setup.ensure_environments(REPO)
         environments = [value for path, method, value in calls if method == 'PUT']
         self.assertEqual(len(environments), 3)
@@ -71,6 +73,34 @@ class MobilePolicyTests(unittest.TestCase):
             self.assertEqual(value['reviewers'], [])
             self.assertEqual(value['wait_timer'], 0)
         self.assertFalse(any('/secrets' in path or '/variables' in path for path, _, _ in calls))
+
+    def test_migration_has_no_password_keystore_or_secret_operations(self):
+        with patch('sys.argv', ['setup', '--repository', REPO, '--environments-only']), \
+                patch.object(owner_setup, 'gh_api', return_value=dict(login='robdor80')), \
+                patch.object(owner_setup, 'ensure_environments') as configure, \
+                patch.object(owner_setup.getpass, 'getpass', side_effect=AssertionError('No password prompt')), \
+                patch.object(owner_setup, 'command', side_effect=AssertionError('No key or secret commands')):
+            owner_setup.main()
+        configure.assert_called_once_with(REPO)
+
+    def test_setup_never_overwrites_existing_signing_secrets(self):
+        values = dict(SIGNING_KEYSTORE_B64='fixture', SIGNING_ALIAS='fixture')
+        with patch.object(owner_setup, 'gh_api', return_value=dict(secrets=[dict(name=k) for k in values])), \
+                patch.object(owner_setup, 'command') as command:
+            owner_setup.provision_signing_secrets(REPO, 'android-release', values)
+        command.assert_not_called()
+
+    def test_migration_clears_existing_approvals_without_recreating_environments(self):
+        calls = []
+        def api(path, method='GET', value=None):
+            calls.append((path, method, value))
+            return dict(environments=[dict(name='android-' + c) for c in ('release', 'dev', 'publish')])
+        with patch.object(owner_setup, 'gh_api', side_effect=api), patch.object(m, 'protected_environment'):
+            owner_setup.ensure_environments(REPO)
+        writes = [(path, method, value) for path, method, value in calls if method != 'GET']
+        self.assertEqual(len(writes), 3)
+        self.assertTrue(all(method == 'PUT' and value['reviewers'] == [] and value['wait_timer'] == 0 for _, method, value in writes))
+        self.assertFalse(any('/secrets' in path or '/variables' in path or '/deployment-branch-policies' in path for path, _, _ in writes))
 
     def test_setup_disabled_before_keys_or_api(self):
         with patch.dict(os.environ, dict(ENV, DISTRIBUTION_ENABLED='')), patch.object(m, 'api') as api:
@@ -83,41 +113,24 @@ class MobilePolicyTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 m.guard(argparse.Namespace())
 
-    def guard_fixture(self, operation='prepare', run_changes=None, main=SOURCE, ci='success', notes='Approved fixture notes'):
-        args = argparse.Namespace(source=SOURCE, operation=operation, channel='release', tag='v0.1.0',
-                                  confirmation='PUBLICAR v0.1.0', expected_sha256='ab' * 32,
-                                  candidate_run='12345', config_output='fixture')
-        run = dict(conclusion='success', event='workflow_dispatch', head_sha=SOURCE, head_branch='main',
-                   actor=dict(login='robdor80'), triggering_actor=dict(login='robdor80'), path='.github/workflows/android-distribute.yml')
-        run.update(run_changes or {})
+    def guard_fixture(self, main=SOURCE, notes='Versioned fixture notes'):
+        args = argparse.Namespace(source=SOURCE, channel='release', tag='', config_output='fixture')
         def api(path, *unused):
             if '/compare/' in path:
                 return dict(status='ahead')
             if path.endswith('/branches/main'):
                 return dict(commit=dict(sha=main))
-            if '/workflows/android.yml/runs' in path:
-                return dict(workflow_runs=[dict(head_sha=SOURCE, head_branch='main', conclusion=ci, head_repository=dict(full_name=REPO))])
-            if '/actions/runs/' in path:
-                return run
-            raise AssertionError('Unexpected API')
+            raise AssertionError('Unexpected API; no prior run or separate CI approval is required')
         with patch.dict(os.environ, dict(ENV, GITHUB_EVENT_PATH='fixture')), patch.object(d, 'load', return_value=EVENT), \
-                patch.object(m, 'api', side_effect=api), patch.object(m, 'protected_environment'), \
+                patch.object(m, 'api', side_effect=api), patch.object(m, 'protected_environment') as environment, \
                 patch.object(m, 'raw_file', side_effect=lambda repo, ref, path: Path('.github/android-distribution.json').read_text() if path == m.CONFIG else notes), patch.object(d, 'write'):
             m.guard(args)
+        self.assertEqual(environment.call_args_list, [unittest.mock.call(REPO, 'android-release'), unittest.mock.call(REPO, 'android-publish')])
 
-    def test_guard_requires_current_main_and_latest_ci(self):
+    def test_guard_requires_current_main_without_another_authorization(self):
         self.guard_fixture()
-        self.guard_fixture(operation='distribute', ci=None)
-        for values in (dict(main='c' * 40), dict(ci='failure'), dict(ci=None)):
-            with self.subTest(values=values), self.assertRaises(ValueError):
-                self.guard_fixture(**values)
-
-    def test_guard_rejects_untrusted_candidate_runs(self):
-        self.guard_fixture(operation='publish')
-        for change in (dict(path='.github/workflows/untrusted.yml'), dict(event='push'), dict(head_sha='c' * 40),
-                       dict(actor=dict(login='someone')), dict(triggering_actor=dict(login='someone')), dict(conclusion='failure')):
-            with self.subTest(change=change), self.assertRaises(ValueError):
-                self.guard_fixture(operation='publish', run_changes=change)
+        with self.assertRaises(ValueError):
+            self.guard_fixture(main='c' * 40)
 
     def test_placeholder_notes_block_distribution(self):
         with self.assertRaises(ValueError):
@@ -148,7 +161,7 @@ class MobilePolicyTests(unittest.TestCase):
         with patch.object(m, 'pages', return_value=[release]), patch.object(m, 'raw_file', return_value=json.dumps(dict(contract, versionCode=1))):
             m.increasing(REPO, contract)
 
-    def test_publish_is_dry_unless_execute_and_owner_enabled(self):
+    def test_publish_dry_plan_never_writes(self):
         settings = d.load('.github/android-distribution.json')
         contract = dict(channel='release')
         args = argparse.Namespace(config_output='fixture', directory='fixture', source=SOURCE,
@@ -160,10 +173,6 @@ class MobilePolicyTests(unittest.TestCase):
                 patch.object(m, 'publication_files', return_value={d.CONTRACT: '{}'}), patch.object(m, 'api') as api:
             m.publish(args)
             api.assert_not_called()
-            args.execute = True
-            with patch.dict(os.environ, ANDROID_PUBLICATION_EXECUTE=''), self.assertRaises(ValueError):
-                m.publish(args)
-            api.assert_not_called()
 
     def test_main_source_changed_stops_before_candidate_or_writes(self):
         with patch.object(m, 'guard', side_effect=ValueError('Source changed')), patch.object(m, 'candidate') as candidate, patch.object(m, 'api') as api:
@@ -172,7 +181,7 @@ class MobilePolicyTests(unittest.TestCase):
             candidate.assert_not_called()
             api.assert_not_called()
 
-    def publication_fixture(self, upload_fails=False, operation='publish'):
+    def publication_fixture(self, upload_fails=False):
         with tempfile.TemporaryDirectory(prefix='publish-api-fixture-') as folder:
             root = Path(folder)
             apk = root / 'Android-release.apk'; apk.write_bytes(b'API transaction fixture; not a production APK')
@@ -206,8 +215,8 @@ class MobilePolicyTests(unittest.TestCase):
                 raise AssertionError(path)
             def raw(repo, ref, path):
                 return json.dumps(contract) if path == d.CONTRACT else 'Approved fixture notes'
-            args = argparse.Namespace(config_output='fixture', source=SOURCE, tag='v0.1.0', channel='release', execute=True, directory=str(root), operation=operation)
-            with patch.dict(os.environ, dict(ENV, ANDROID_PUBLICATION_EXECUTE='owner-approved')), \
+            args = argparse.Namespace(config_output='fixture', source=SOURCE, tag='v0.1.0', channel='release', execute=True, directory=str(root))
+            with patch.dict(os.environ, ENV), \
                     patch.object(m, 'guard'), patch.object(d, 'load', return_value=settings), \
                     patch.object(m, 'candidate', return_value=(contract, {}, apk)), patch.object(m, 'increasing'), \
                     patch.object(m, 'pages', return_value=[]), patch.object(m, 'raw_file', side_effect=raw), \
@@ -226,10 +235,6 @@ class MobilePolicyTests(unittest.TestCase):
             self.assertTrue(next(data['draft'] for path, method, data in writes if path.endswith('/releases')))
             finalizations = [data for path, method, data in writes if method == 'PATCH']
             self.assertEqual(finalizations, [] if upload_fails else [dict(draft=False)])
-
-    def test_automatic_publication_transaction(self):
-        self.publication_fixture(operation='distribute')
-        self.publication_fixture(upload_fails=True, operation='distribute')
 
     def test_publication_transaction_without_rebuilding(self):
         self.publication_fixture()
@@ -253,8 +258,7 @@ class MobileSignedTests(unittest.TestCase):
         self.config_path = self.root / 'config.json'
         d.write(self.config_path, self.settings)
         self.args = argparse.Namespace(source=SOURCE, channel='release', tag='v0.1.0',
-            config_output=str(self.config_path), apk=str(self.fixture.source.resolve()), directory=str(self.root / 'candidate'),
-            expected_sha256='', candidate_run='12345')
+            config_output=str(self.config_path), apk=str(self.fixture.source.resolve()), directory=str(self.root / 'candidate'))
         password = self.fixture.env['ROBSTORE_TEST_PASSWORD']
         self.env = dict(ENV, SIGNING_KEYSTORE_B64=base64.b64encode((self.fixture.directory / 'fixture-1.p12').read_bytes()).decode(),
                         SIGNING_STORE_PASSWORD=password, SIGNING_KEY_PASSWORD=password, SIGNING_ALIAS='fixture',
@@ -265,30 +269,17 @@ class MobileSignedTests(unittest.TestCase):
         with patch.dict(os.environ, self.env), patch.object(m, 'increasing'), patch('builtins.print'):
             m.sign(self.args)
         self.contract = d.load(Path(self.args.directory) / d.CONTRACT)
-        self.args.expected_sha256 = self.contract['sha256']
 
-    def test_real_sign_contract_and_approved_hash(self):
+    def test_real_sign_contract_and_same_run_provenance(self):
         self.sign()
         with patch.dict(os.environ, self.env):
             contract, receipt, apk = m.candidate(self.args, self.settings)
             self.assertEqual(receipt['sourceCommit'], SOURCE)
             self.assertEqual(d.digest(apk), contract['sha256'])
-            self.args.expected_sha256 = '00' * 32
-            with self.assertRaises(ValueError):
-                m.candidate(self.args, self.settings)
-
-    def test_automatic_candidate_uses_current_run_without_user_hash(self):
-        self.sign()
-        self.args.operation = 'distribute'
-        self.args.expected_sha256 = ''
-        with patch.dict(os.environ, self.env):
+        with patch.dict(os.environ, dict(self.env, GITHUB_RUN_ID='99999')), self.assertRaises(ValueError):
             m.candidate(self.args, self.settings)
-            self.args.candidate_run = '99999'
-            with self.assertRaises(ValueError):
-                m.candidate(self.args, self.settings)
 
     def test_automatic_sign_derives_tag_from_apk(self):
-        self.args.operation = 'distribute'
         self.args.tag = ''
         self.sign()
         self.assertEqual(self.args.tag, 'v0.1.0')

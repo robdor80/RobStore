@@ -7,7 +7,8 @@ secretos; firma en un trabajo separado con las claves existentes; verifica el AP
 y publica automáticamente la Release. No hay segunda orden ni revisión de entorno.
 Los pushes y las PR siguen sin publicar.
 
-El único input es `channel` (`release` por defecto, o `dev`). El commit lo selecciona
+El motor ya no ofrece operaciones separadas `prepare`/`publish`, confirmaciones
+escritas ni inputs de hash o ejecución. El único input de RobPublisher es `channel` (`release` por defecto, o `dev`). El commit lo selecciona
 GitHub al recibir la orden; la versión y la etiqueta se obtienen del APK:
 `v<versionName>` para Release y `dev-<versionName>-<versionCode>` para DEV.
 El hash y el identificador de ejecución se transmiten internamente. No se solicitan
@@ -37,30 +38,43 @@ Tras fusionar esta PR, realizar una sola vez por repositorio:
    commit fusionado. Mantener `ANDROID_DISTRIBUTION_ENABLED=true`. Son ajustes únicos
    de esta migración, no datos que se pidan en cada publicación.
 
-Alternativa por API para retirar revisores y temporizadores, con la sesión GitHub
-administradora ya configurada (repetir cambiando el repositorio):
+La retirada de aprobaciones también puede automatizarse con el modo de migración:
 
 ```sh
-repo=robdor80/RobStore
-for environment in android-release android-dev android-publish; do
-  gh api --method PUT "repos/$repo/environments/$environment" --input - <<'JSON'
-{"wait_timer":0,"prevent_self_review":false,"reviewers":[],"deployment_branch_policy":{"protected_branches":false,"custom_branch_policies":true}}
-JSON
-done
+python3 tools/android_owner_setup.py --repository robdor80/Cuadrante_App --environments-only
 ```
 
-Este comando no modifica secretos ni variables ni las políticas de ramas existentes.
-Las reglas personalizadas de aplicaciones, si existen, se desactivan en la pantalla
-del entorno. El motor detecta reglas pendientes antes de compilar o acceder a claves.
-No ejecutar de nuevo el asistente de claves para esta migración. El asistente de
-alta crea los entornos nuevos sin revisores ni temporizador; conserva las protecciones
-existentes contra la sustitución de identidades durante una recuperación.
+Este modo usa una sesión administradora existente y funciona sin Termux, directorio
+privado, keystores, contraseñas ni escritura de secretos. Actualiza los tres entornos
+sin borrarlos ni recrearlos; conserva sus variables y las políticas de rama. Sirve
+para esta migración única, nunca para publicar cada versión. El asistente completo
+queda reservado al alta inicial o a una recuperación deliberada: al guardar secretos
+sólo crea los que faltan, nunca sobrescribe los ya configurados.
+
+No ejecutar de nuevo el alta de claves para migrar aplicaciones existentes. Las claves
+Release y DEV configuradas se reutilizan automáticamente. En particular, la Release
+original de Cuadrante sigue fijada al certificado histórico del registro central;
+una clave diferente bloquea la firma, sin regeneración ni sustitución de identidad.
+
+### Estado de los entornos actuales
+
+La inspección de los repositorios mostró que RobStore no tiene estos tres entornos
+y Cuadrante sí, con revisores obligatorios. La conexión disponible devuelve
+`403 Resource not accessible by integration` al modificar los entornos de Cuadrante.
+Los intentos fueron rechazados y no cambiaron aprobaciones, claves ni secretos.
+La retirada efectiva queda pendiente de ejecutar la migración única con acceso
+administrador. No se ha lanzado ningún workflow de distribución para comprobarlo.
+
+El motor admite la regla técnica `branch_policy` que devuelve GitHub al limitar
+los despliegues a `main`; rechaza revisores y temporizadores antes de acceder a
+claves. Esta distinción evita que una restricción de rama se interprete como una
+aprobación humana.
 
 ## Adaptación mínima de RobPublisher
 
 El código de la aplicación RobPublisher no está en este repositorio. Se entrega
 `tools/robpublisher_dispatch.py` como adaptador ejecutable y contrato de integración.
-Su botón **Publicar** realiza exactamente una petición usando su autenticación
+Su botón **Publicar actualización** realiza exactamente una petición usando su autenticación
 GitHub persistente del propietario `robdor80`:
 
 ```http
@@ -81,7 +95,13 @@ RobPublisher muestra «Orden aceptada» al recibir éxito; esto no significa tod
 mostrar el resultado, sin pedir al usuario ningún identificador. La credencial
 persistente necesita permiso para despachar Actions y leer su estado; las escrituras
 de la Release usan el `GITHUB_TOKEN` del trabajo de publicación, no una contraseña
-introducida en el botón. El adaptador utiliza la sesión existente de `gh`.
+introducida en el botón. El adaptador utiliza la sesión existente de `gh` para clientes que ejecuten procesos.
+Una aplicación RobPublisher nativa envía la misma petición HTTP con su credencial
+persistente; no necesita instalar ni abrir Termux para publicar. El botón no debe
+mostrar controles de firma, certificados, secretos, hashes ni ejecuciones.
+Después de la publicación, RobStore usa el descubrimiento existente de Releases
+estables y el manifiesto `robstore.json` generado automáticamente. El topic
+`robstore-app` se configura una sola vez al dar de alta la aplicación.
 
 No añadir un diálogo de confirmación ni repetir automáticamente un POST cuya
 respuesta se haya perdido. Deshabilitar el botón mientras su petición está en curso.
@@ -96,3 +116,14 @@ de PR ejecuta estas pruebas sobre su APK de prueba, sin claves de producción.
 No ejecutar `robpublisher_dispatch.py`, `gh workflow run` ni el workflow de distribución
 para validar esta entrega. Crear esta PR no configura entornos, no cambia claves,
 no crea etiquetas ni publica Releases.
+
+
+## Límite técnico pendiente en Cuadrante
+
+Eliminar revisores no corrige un fallo de `apksigner`. Esta entrega conserva la
+firma y la verificación técnica obligatorias y no cambia el parser de certificados.
+El fallo actual de Cuadrante sigue pendiente de diagnóstico/corrección independiente
+del cambio de autorizaciones; no se declara resuelto sin una comprobación técnica
+específica. Un fallo de compilación, firma o verificación detiene el flujo antes de
+hacer pública la Release. No se pide al propietario que aporte otro certificado,
+regenere claves o complete manualmente la firma como alternativa.
