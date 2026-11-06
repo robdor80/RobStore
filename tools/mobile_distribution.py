@@ -81,7 +81,7 @@ def identity(event, repo, source, channel, tag=''):
 
 
 def validate_tag(channel, tag):
-    pattern = r'v[0-9]+\.[0-9]+\.[0-9]+' if channel == 'release' else r'dev-[A-Za-z0-9][A-Za-z0-9._-]*'
+    pattern = r'v[A-Za-z0-9][A-Za-z0-9._-]*' if channel == 'release' else r'dev-[A-Za-z0-9][A-Za-z0-9._-]*'
     d.require(re.fullmatch(pattern, tag), 'Unsafe channel tag')
 
 
@@ -246,7 +246,10 @@ def increasing(repo, contract):
 
 
 def expected_tag(contract):
-    return 'v' + contract['versionName'] if contract['channel'] == 'release' else f"dev-{contract['versionName']}-{contract['versionCode']}"
+    # Android only requires a growing versionCode; versionName need not be unique or semantic.
+    version = re.sub(r'[^A-Za-z0-9._-]+', '-', contract['versionName']).replace('..', '-').strip('.-_') or 'build'
+    prefix = 'v' if contract['channel'] == 'release' else 'dev-'
+    return f"{prefix}{version}-{contract['versionCode']}"
 
 
 def sign(args):

@@ -23,8 +23,10 @@ revisión interna no es un dato que deba configurar o copiar el propietario.
 Actualizar el motor central actualiza todas las aplicaciones. Se eliminan
 `ANDROID_DISTRIBUTION_TOOLING_SHA` y `ANDROID_DISTRIBUTION_ENABLED`.
 
-La versión sale del APK compilado: `v<versionName>` o
-`dev-<versionName>-<versionCode>`. El proyecto debe incrementar `versionCode` para
+La versión sale del APK compilado. La etiqueta se genera como
+`v<versionName>-<versionCode>` o `dev-<versionName>-<versionCode>`, normalizando
+los caracteres que GitHub no admite. Así puede repetirse `versionName` sin tener
+que elegir otra etiqueta manualmente; la compatibilidad Android depende de `versionCode`. El proyecto debe incrementar `versionCode` para
 actualizar Android; esto forma parte del cambio de código, no de la firma. Las
 notas se leen del proyecto si existen; si faltan o son provisionales se usa el
 nombre de la aplicación y su versión, sin una aprobación editorial adicional.

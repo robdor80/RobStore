@@ -118,6 +118,13 @@ class MobilePolicyTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.guard_fixture(main='c' * 40)
 
+    def test_tags_need_no_manual_edit_when_only_android_version_code_changes(self):
+        first = dict(channel='release', versionName='1.0 (personal)', versionCode=1)
+        second = dict(first, versionCode=2)
+        self.assertNotEqual(m.expected_tag(first), m.expected_tag(second))
+        m.validate_tag('release', m.expected_tag(first))
+        m.validate_tag('release', m.expected_tag(second))
+
     def test_configuration_separates_packages_and_paths(self):
         good = d.load('.github/android-distribution.json')
         m.config(good, REPO)
@@ -274,7 +281,7 @@ class MobileSignedTests(unittest.TestCase):
     def test_automatic_sign_derives_tag_from_apk(self):
         self.args.tag = ''
         self.sign()
-        self.assertEqual(self.args.tag, 'v0.1.0')
+        self.assertEqual(self.args.tag, 'v0.1.0-1')
 
     def test_wrong_keys_fail_certificate_verification(self):
         for index, pin in enumerate((self.fixture.certificates[1], '00' * 32)):
