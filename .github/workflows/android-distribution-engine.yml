@@ -109,7 +109,6 @@ jobs:
       - id: sign
         name: Sign in isolation; no Gradle or application scripts
         env:
-          GH_TOKEN: ${{ github.token }}
           SIGNING_KEYSTORE_B64: ${{ secrets.SIGNING_KEYSTORE_B64 }}
           SIGNING_STORE_PASSWORD: ${{ secrets.SIGNING_STORE_PASSWORD }}
           SIGNING_KEY_PASSWORD: ${{ secrets.SIGNING_KEY_PASSWORD }}

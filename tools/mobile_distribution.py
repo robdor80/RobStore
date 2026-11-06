@@ -12,6 +12,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 from urllib.parse import quote
 import distribution as d
 
@@ -279,7 +280,6 @@ def sign(args):
     # The directory above is gone before any artifact upload. No Gradle in this job.
     args.tag = expected_tag(contract)
     validate_tag(args.channel, args.tag)
-    increasing(settings['repository'], contract)
     d.write(output / d.CONTRACT, contract)
     d.write(output / d.RECEIPT, dict(schemaVersion=1, sourceCommit=args.source, channel=args.channel,
                                     certificateSha256=certificate, apkSha256=contract['sha256'],
@@ -331,15 +331,17 @@ def publication_files(settings, source, contract, receipt):
 
 
 def publish(args):
-    # Recheck authorization and main/CI immediately before writing; no build or signing here.
+    # Recheck the explicit order and source before writing; no rebuild or signing here.
     guard(args)
     settings = config(d.load(args.config_output), os.environ['GITHUB_REPOSITORY'])
     contract, receipt, apk = candidate(args, settings)
     repo = settings['repository']
     increasing(repo, contract)
-    d.require(args.tag not in [t['name'] for t in pages(f'repos/{repo}/tags')], 'Never move or reuse a public tag')
+    existing_tags = {tag['name'] for tag in pages(f'repos/{repo}/tags')}
     d.require(args.tag not in [b['name'] for b in pages(f'repos/{repo}/branches')], 'Tag name collides with a branch')
-    d.require(not any(r['tag_name'] == args.tag for r in pages(f'repos/{repo}/releases')), 'Release/tag already used, including draft')
+    matches = [release for release in pages(f'repos/{repo}/releases') if release['tag_name'] == args.tag]
+    d.require(not any(not release['draft'] for release in matches), 'This version is already published')
+    draft = matches[0] if matches else None
     try:
         notes = raw_file(repo, args.source, settings['notesPath'])
     except ValueError:
@@ -363,20 +365,34 @@ def publish(args):
     d.require(api(f'repos/{repo}/branches/main')['commit']['sha'] == args.source, 'Main changed; no tag or Release created')
     # No branch is moved. The tag makes this closure commit reachable.
     tag = api(f'repos/{repo}/git/tags', 'POST', dict(tag=args.tag, message=f"Signed APK SHA-256 {contract['sha256']}; source {args.source}", object=commit['sha'], type='commit'))
-    api(f'repos/{repo}/git/refs', 'POST', dict(ref='refs/tags/' + args.tag, sha=tag['sha']))
-    release = api(f'repos/{repo}/releases', 'POST', dict(tag_name=args.tag, target_commitish=commit['sha'], name=args.tag,
+    if args.tag in existing_tags:
+        # Only unpublished tags reach this point; retry without asking for manual cleanup.
+        api(f'repos/{repo}/git/refs/tags/{args.tag}', 'PATCH', dict(sha=tag['sha'], force=True))
+    else:
+        api(f'repos/{repo}/git/refs', 'POST', dict(ref='refs/tags/' + args.tag, sha=tag['sha']))
+    metadata = dict(tag_name=args.tag, target_commitish=commit['sha'], name=args.tag,
         body=notes + f"\n\nSource: `{args.source}`\nPublication commit: `{commit['sha']}`\nAPK SHA-256: `{contract['sha256']}`\n",
-        draft=True, prerelease=args.channel == 'dev'))
+        draft=True, prerelease=args.channel == 'dev')
+    if draft:
+        api(f'repos/{repo}/releases/{draft["id"]}', 'PATCH', metadata)
+        release = draft
+    else:
+        release = api(f'repos/{repo}/releases', 'POST', metadata)
     for file in (apk, Path(args.directory) / 'SHA256SUMS'):
-        result = subprocess.run(['gh', 'release', 'upload', args.tag, str(file), '--repo', repo], capture_output=True)
-        d.require(result.returncode == 0, 'Upload failed; draft/tag retained for owner inspection; no automatic retry')
+        for attempt in range(3):
+            result = subprocess.run(['gh', 'release', 'upload', args.tag, str(file), '--repo', repo, '--clobber'], capture_output=True)
+            if result.returncode == 0:
+                break
+            if attempt < 2:
+                time.sleep(2)
+        d.require(result.returncode == 0, 'Upload failed after automatic retries; the draft can resume from RobPublisher')
     uploaded = api(f'repos/{repo}/releases/{release["id"]}')
     assets = [a for a in uploaded['assets'] if a['name'] == apk.name]
     d.require(len(assets) == 1 and assets[0]['state'] == 'uploaded' and assets[0]['size'] == apk.stat().st_size and
               assets[0].get('digest') == 'sha256:' + contract['sha256'], 'Uploaded APK digest mismatch; draft retained')
     tagged = json.loads(raw_file(repo, 'refs/tags/' + args.tag, d.CONTRACT))
     d.validate_contract(tagged, contract)
-    d.require(api(f'repos/{repo}/branches/main')['commit']['sha'] == args.source, 'Main changed; leave draft for owner inspection')
+    d.require(api(f'repos/{repo}/branches/main')['commit']['sha'] == args.source, 'Main changed; the next order can resume the unpublished draft')
     api(f'repos/{repo}/releases/{release["id"]}', 'PATCH', dict(draft=False))
     print('Authorized publication completed: ' + release['html_url'])
 

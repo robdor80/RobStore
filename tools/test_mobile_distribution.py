@@ -173,6 +173,16 @@ class MobilePolicyTests(unittest.TestCase):
             m.publish(args)
             api.assert_not_called()
 
+    def test_published_release_is_never_replaced_on_retry(self):
+        args = argparse.Namespace(config_output='fixture', tag='v0.1.0')
+        settings = d.load('.github/android-distribution.json')
+        with patch.dict(os.environ, ENV), patch.object(m, 'guard'), patch.object(d, 'load', return_value=settings), \
+                patch.object(m, 'candidate', return_value=({}, {}, Path('fixture.apk'))), patch.object(m, 'increasing'), \
+                patch.object(m, 'pages', side_effect=lambda path: [dict(tag_name=args.tag, draft=False)] if path.endswith('/releases') else []), \
+                patch.object(m, 'api') as api, self.assertRaises(ValueError):
+            m.publish(args)
+        api.assert_not_called()
+
     def test_main_source_changed_stops_before_candidate_or_writes(self):
         with patch.object(m, 'guard', side_effect=ValueError('Source changed')), patch.object(m, 'candidate') as candidate, patch.object(m, 'api') as api:
             with self.assertRaises(ValueError):
@@ -180,7 +190,7 @@ class MobilePolicyTests(unittest.TestCase):
             candidate.assert_not_called()
             api.assert_not_called()
 
-    def publication_fixture(self, upload_fails=False):
+    def publication_fixture(self, upload_fails=False, existing_draft=False):
         with tempfile.TemporaryDirectory(prefix='publish-api-fixture-') as folder:
             root = Path(folder)
             apk = root / 'Android-release.apk'; apk.write_bytes(b'API transaction fixture; not a production APK')
@@ -205,7 +215,7 @@ class MobilePolicyTests(unittest.TestCase):
                     return dict(commit=dict(sha=SOURCE))
                 if path.endswith('/git/tags'):
                     return dict(sha='f' * 40)
-                if path.endswith('/git/refs'):
+                if path.endswith('/git/refs') or '/git/refs/tags/' in path:
                     return {}
                 if path.endswith('/releases'):
                     return dict(id=1, html_url='https://github.com/robdor80/RobStore/releases/tag/v0.1.0')
@@ -218,11 +228,11 @@ class MobilePolicyTests(unittest.TestCase):
             with patch.dict(os.environ, ENV), \
                     patch.object(m, 'guard'), patch.object(d, 'load', return_value=settings), \
                     patch.object(m, 'candidate', return_value=(contract, {}, apk)), patch.object(m, 'increasing'), \
-                    patch.object(m, 'pages', return_value=[]), patch.object(m, 'raw_file', side_effect=raw), \
+                    patch.object(m, 'pages', side_effect=lambda path: ([dict(id=1, tag_name='v0.1.0', draft=True, html_url='fixture-release')] if path.endswith('/releases') else [dict(name='v0.1.0')] if path.endswith('/tags') else []) if existing_draft else []), patch.object(m, 'raw_file', side_effect=raw), \
                     patch.object(m, 'publication_files', return_value={d.CONTRACT: json.dumps(contract)}), \
                     patch.object(m, 'api', side_effect=api), \
                     patch.object(subprocess, 'run', return_value=subprocess.CompletedProcess([], 1 if upload_fails else 0)), \
-                    patch.object(d, 'run', side_effect=AssertionError('Never rebuild or sign during publication')), patch('builtins.print'):
+                    patch.object(d, 'run', side_effect=AssertionError('Never rebuild or sign during publication')), patch.object(m.time, 'sleep'), patch('builtins.print'):
                 if upload_fails:
                     with self.assertRaises(ValueError):
                         m.publish(args)
@@ -230,10 +240,17 @@ class MobilePolicyTests(unittest.TestCase):
                     m.publish(args)
             writes = [(path, method, data) for path, method, data in calls if method != 'GET']
             self.assertEqual(next(data['parents'] for path, method, data in writes if path.endswith('/git/commits')), [SOURCE])
-            self.assertEqual(next(data['ref'] for path, method, data in writes if path.endswith('/git/refs')), 'refs/tags/v0.1.0')
-            self.assertTrue(next(data['draft'] for path, method, data in writes if path.endswith('/releases')))
-            finalizations = [data for path, method, data in writes if method == 'PATCH']
+            if existing_draft:
+                self.assertTrue(any('/git/refs/tags/' in path and method == 'PATCH' for path, method, _ in writes))
+                self.assertFalse(any(path.endswith('/releases') for path, _, _ in writes))
+            else:
+                self.assertEqual(next(data['ref'] for path, method, data in writes if path.endswith('/git/refs')), 'refs/tags/v0.1.0')
+                self.assertTrue(next(data['draft'] for path, method, data in writes if path.endswith('/releases')))
+            finalizations = [data for path, method, data in writes if method == 'PATCH' and data == dict(draft=False)]
             self.assertEqual(finalizations, [] if upload_fails else [dict(draft=False)])
+
+    def test_retry_resumes_draft_without_manual_tag_or_release_cleanup(self):
+        self.publication_fixture(existing_draft=True)
 
     def test_publication_transaction_without_rebuilding(self):
         self.publication_fixture()

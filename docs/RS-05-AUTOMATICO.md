@@ -34,7 +34,9 @@ nombre de la aplicación y su versión, sin una aprobación editorial adicional.
 Se conservan las comprobaciones automáticas de APK, paquete, certificado original,
 versión creciente, firma Android, subida y contrato para RobStore. La compilación
 no recibe claves. La firma usa `apksigner`; publicar usa el mismo APK firmado.
-Un error de subida conserva un borrador y no declara la actualización publicada.
+Las subidas se reintentan automáticamente. Un fallo persistente conserva un
+borrador; otra orden desde RobPublisher lo retoma sin borrar etiquetas o Releases
+a mano. Una versión ya pública se conserva y nunca se sobrescribe.
 
 ## Alta inicial, una sola vez
 
