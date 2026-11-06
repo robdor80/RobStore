@@ -2,15 +2,9 @@ name: Reusable Android distribution engine
 on:
   workflow_call:
     inputs:
-      operation: {type: string, required: true}
       source_sha: {type: string, required: true}
       channel: {type: string, required: true}
-      tag: {type: string, required: true}
-      candidate_run: {type: string, default: ''}
-      expected_sha256: {type: string, default: ''}
-      confirmation: {type: string, default: ''}
-      tooling_sha: {type: string, required: true}
-# This group spans prepare/publish and all channels in a repository. Never cancel a publication.
+# Serialize the complete build/sign/publish operation across channels.
 concurrency:
   group: android-official-${{ github.repository }}
   cancel-in-progress: false
@@ -21,32 +15,27 @@ permissions:
 env:
   SOURCE_SHA: ${{ inputs.source_sha }}
   CHANNEL: ${{ inputs.channel }}
-  RELEASE_TAG: ${{ inputs.tag }}
-  OPERATION: ${{ inputs.operation }}
-  CANDIDATE_RUN: ${{ inputs.candidate_run }}
-  APPROVED_SHA256: ${{ inputs.expected_sha256 }}
-  PUBLICATION_CONFIRMATION: ${{ inputs.confirmation }}
-  TOOLING_SHA: ${{ inputs.tooling_sha }}
-  DISTRIBUTION_ENABLED: ${{ vars.ANDROID_DISTRIBUTION_ENABLED }}
 jobs:
   guard:
+    outputs:
+      engine_sha: ${{ steps.engine.outputs.sha }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
-      - name: Require immutable tooling selection
-        run: python3 -c 'import os,re; assert re.fullmatch("[0-9a-f]{40}", os.environ["TOOLING_SHA"])'
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: robdor80/RobStore
-          ref: ${{ inputs.tooling_sha }}
+          ref: main
           persist-credentials: false
-      - name: Owner, source, CI and environment policy
+      - id: engine
+        name: Select central engine once for this distribution
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+      - name: Owner, source and automatic environment policy
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          python3 tools/mobile_distribution.py guard --source "$SOURCE_SHA" --operation "$OPERATION" --channel "$CHANNEL" --tag "$RELEASE_TAG" --candidate-run "$CANDIDATE_RUN" --expected-sha256 "$APPROVED_SHA256" --confirmation "$PUBLICATION_CONFIRMATION" --config-output "$RUNNER_TEMP/distribution.json"
+          python3 tools/mobile_distribution.py guard --source "$SOURCE_SHA" --channel "$CHANNEL" --config-output "$RUNNER_TEMP/distribution.json"
   build:
-    if: inputs.operation == 'prepare'
     needs: guard
     runs-on: ubuntu-24.04
     timeout-minutes: 20
@@ -61,7 +50,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: robdor80/RobStore
-          ref: ${{ inputs.tooling_sha }}
+          ref: ${{ needs.guard.outputs.engine_sha }}
           path: engine
           persist-credentials: false
       - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
@@ -86,7 +75,8 @@ jobs:
           retention-days: 3
           if-no-files-found: error
   sign:
-    if: inputs.operation == 'prepare'
+    outputs:
+      tag: ${{ steps.sign.outputs.tag }}
     needs: [guard, build]
     runs-on: ubuntu-24.04
     timeout-minutes: 10
@@ -99,7 +89,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: robdor80/RobStore
-          ref: ${{ inputs.tooling_sha }}
+          ref: ${{ needs.guard.outputs.engine_sha }}
           persist-credentials: false
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
@@ -115,18 +105,17 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          python3 tools/mobile_distribution.py guard --source "$SOURCE_SHA" --operation prepare --channel "$CHANNEL" --tag "$RELEASE_TAG" --config-output "$RUNNER_TEMP/distribution.json"
-      - name: Sign in isolation; no Gradle or application scripts
+          python3 tools/mobile_distribution.py guard --source "$SOURCE_SHA" --channel "$CHANNEL" --config-output "$RUNNER_TEMP/distribution.json"
+      - id: sign
+        name: Sign in isolation; no Gradle or application scripts
         env:
-          GH_TOKEN: ${{ github.token }}
           SIGNING_KEYSTORE_B64: ${{ secrets.SIGNING_KEYSTORE_B64 }}
           SIGNING_STORE_PASSWORD: ${{ secrets.SIGNING_STORE_PASSWORD }}
           SIGNING_KEY_PASSWORD: ${{ secrets.SIGNING_KEY_PASSWORD }}
           SIGNING_ALIAS: ${{ secrets.SIGNING_ALIAS }}
           CERTIFICATE_SHA256: ${{ vars.CERTIFICATE_SHA256 }}
-          OTHER_CERTIFICATE_SHA256: ${{ vars.OTHER_CERTIFICATE_SHA256 }}
         run: |
-          python3 tools/mobile_distribution.py sign --source "$SOURCE_SHA" --channel "$CHANNEL" --tag "$RELEASE_TAG" --config-output "$RUNNER_TEMP/distribution.json" --apk "$RUNNER_TEMP/unsigned/unsigned.apk" --directory "$RUNNER_TEMP/candidate"
+          python3 tools/mobile_distribution.py sign --source "$SOURCE_SHA" --channel "$CHANNEL" --config-output "$RUNNER_TEMP/distribution.json" --apk "$RUNNER_TEMP/unsigned/unsigned.apk" --directory "$RUNNER_TEMP/candidate"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: android-candidate-${{ inputs.channel }}-${{ inputs.source_sha }}
@@ -138,8 +127,9 @@ jobs:
           retention-days: 14
           if-no-files-found: error
   publish:
-    if: inputs.operation == 'publish'
-    needs: guard
+    needs: [guard, sign]
+    env:
+      RELEASE_TAG: ${{ needs.sign.outputs.tag }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     environment: android-publish
@@ -151,14 +141,14 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: robdor80/RobStore
-          ref: ${{ inputs.tooling_sha }}
+          ref: ${{ needs.guard.outputs.engine_sha }}
           persist-credentials: false
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: android-candidate-${{ inputs.channel }}-${{ inputs.source_sha }}
           path: ${{ runner.temp }}/candidate
           repository: ${{ github.repository }}
-          run-id: ${{ inputs.candidate_run }}
+          run-id: ${{ github.run_id }}
           github-token: ${{ github.token }}
       - uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd # v4.0.4
         with:
@@ -166,10 +156,9 @@ jobs:
           packages: platform-tools
           log-accepted-android-sdk-licenses: false
       - run: sdkmanager 'build-tools;35.0.0'
-      - name: Explicit owner-approved publication of unchanged candidate
+      - name: Publish verified signed APK automatically
         env:
           GH_TOKEN: ${{ github.token }}
-          ANDROID_PUBLICATION_EXECUTE: owner-approved
           CERTIFICATE_SHA256: ${{ inputs.channel == 'release' && vars.RELEASE_CERTIFICATE_SHA256 || vars.DEV_CERTIFICATE_SHA256 }}
         run: |
-          python3 tools/mobile_distribution.py publish --execute --source "$SOURCE_SHA" --channel "$CHANNEL" --tag "$RELEASE_TAG" --candidate-run "$CANDIDATE_RUN" --expected-sha256 "$APPROVED_SHA256" --confirmation "$PUBLICATION_CONFIRMATION" --config-output "$RUNNER_TEMP/distribution.json" --directory "$RUNNER_TEMP/candidate"
+          python3 tools/mobile_distribution.py publish --execute --source "$SOURCE_SHA" --channel "$CHANNEL" --tag "$RELEASE_TAG" --config-output "$RUNNER_TEMP/distribution.json" --directory "$RUNNER_TEMP/candidate"

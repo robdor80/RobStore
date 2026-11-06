@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "applications": [
+    {
+      "repository": "robdor80/Cuadrante_App",
+      "tag": "v1.0.0",
+      "packageName": "es.robertodorado.cuadrante",
+      "versionCode": 1,
+      "certificateSha256": "c85a092878e85a35b8ca84132bdf00314da3e90dae80fc137ac52a27d11491e7"
+    }
+  ]
+}
