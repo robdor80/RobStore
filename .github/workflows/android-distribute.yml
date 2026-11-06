@@ -30,6 +30,7 @@ permissions:
 jobs:
   distribute:
     uses: ./.github/workflows/android-distribution-engine.yml
+    secrets: inherit
     permissions:
       contents: write
       actions: read
