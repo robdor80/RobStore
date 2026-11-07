@@ -106,7 +106,7 @@ class MobilePolicyTests(unittest.TestCase):
                 patch.object(owner_setup.getpass, 'getpass', side_effect=AssertionError('No password prompt')), \
                 patch.object(owner_setup, 'command', side_effect=AssertionError('No key or secret commands')):
             owner_setup.main()
-        configure.assert_called_once_with(REPO)
+        configure.assert_called_once_with(REPO, release_only=False)
 
     def test_setup_never_overwrites_existing_signing_secrets(self):
         values = dict(SIGNING_KEYSTORE_B64='fixture', SIGNING_ALIAS='fixture')
@@ -167,7 +167,7 @@ class MobilePolicyTests(unittest.TestCase):
                 patch.object(owner_setup.getpass, 'getpass', side_effect=AssertionError('No passwords')), \
                 patch.object(owner_setup, 'command', side_effect=AssertionError('No keys')):
             owner_setup.main()
-        configure.assert_called_once_with(REPO)
+        configure.assert_called_once_with(REPO, release_only=False)
 
     def test_initial_keys_never_enter_agent_terminal(self):
         with patch.dict(os.environ, CODEX_THREAD_ID='fixture'), \
