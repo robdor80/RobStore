@@ -70,9 +70,10 @@ def restore_backup(directory, ciphertext, repo):
         target.chmod(0o600)
 
 
-def check_existing_identities(repo, public):
+def check_existing_identities(repo, public, release_only=False):
+    channels = ('release',) if release_only else ('release', 'dev')
     # Check every public pin, including the publish environment, before the first secret write.
-    for channel in ('release', 'dev'):
+    for channel in channels:
         existing = gh_api(f'repos/{repo}/environments/android-{channel}/variables')['variables']
         pins = {v['name']: v['value'] for v in existing}
         for key, expected in dict(CERTIFICATE_SHA256=public['certificates'][channel]).items():
@@ -80,14 +81,15 @@ def check_existing_identities(repo, public):
         secrets = gh_api(f'repos/{repo}/environments/android-{channel}/secrets')['secrets']
         require(not secrets or 'CERTIFICATE_SHA256' in pins, 'Existing secrets without a public identity pin; owner must investigate')
     pins = {v['name']: v['value'] for v in gh_api(f'repos/{repo}/environments/android-publish/variables')['variables']}
-    for channel in ('release', 'dev'):
+    for channel in channels:
         require(pins.get(channel.upper() + '_CERTIFICATE_SHA256', public['certificates'][channel]) == public['certificates'][channel],
                 'Existing publication identity differs; never replace it')
 
 
-def ensure_environments(repo):
+def ensure_environments(repo, release_only=False):
+    channels = ('release',) if release_only else ('release', 'dev')
     existing = {x['name'] for x in gh_api(f'repos/{repo}/environments')['environments']}
-    for name in ('android-release', 'android-dev', 'android-publish'):
+    for name in (*('android-' + channel for channel in channels), 'android-publish'):
         # Updating environment protection preserves secrets, variables and branch rules.
         gh_api(f'repos/{repo}/environments/{name}', 'PUT', dict(prevent_self_review=False, wait_timer=0,
                reviewers=[], deployment_branch_policy=dict(protected_branches=False, custom_branch_policies=True)))
@@ -105,13 +107,14 @@ def provision_signing_secrets(repo, name, values):
             command(['gh', 'secret', 'set', key, '--repo', repo, '--env', name], value.encode())
 
 
-def configured(repo):
+def configured(repo, release_only=False):
+    channels = ('release',) if release_only else ('release', 'dev')
     """Only secret names and public pins are read. Private values never leave GitHub."""
     names = {item['name'] for item in gh_api(f'repos/{repo}/environments')['environments']}
     required = {'SIGNING_KEYSTORE_B64', 'SIGNING_STORE_PASSWORD'}
-    if not {'android-release', 'android-dev', 'android-publish'} <= names:
+    if not {'android-publish', *('android-' + channel for channel in channels)} <= names:
         return False
-    for channel in ('release', 'dev'):
+    for channel in channels:
         root = f'repos/{repo}/environments/android-{channel}'
         stored = {item['name'] for item in gh_api(root + '/secrets')['secrets']}
         variables = {item['name']: item['value'] for item in gh_api(root + '/variables')['variables']}
@@ -130,11 +133,13 @@ def main():
     parser.add_argument('--backup', action='store_true', help='Optional encrypted local backup, independent of setup')
     parser.add_argument('--restore-backup')
     parser.add_argument('--catalog', action='store_true')
+    parser.add_argument('--release-only', action='store_true', help='Solo firmar/publicar versiones definitivas')
     args = parser.parse_args()
+    channels = ('release',) if args.release_only else ('release', 'dev')
     require(re.fullmatch(r'robdor80/[A-Za-z0-9_.-]+', args.repository), 'Personal owner repository required')
     if args.environments_only:
         require(gh_api('user')['login'] == 'robdor80', 'Configura una vez el acceso de GitHub del propietario')
-        ensure_environments(args.repository)
+        ensure_environments(args.repository, release_only=args.release_only)
         print('Entornos sin aprobaciones; claves conservadas.')
         return
     directory = Path(args.private_directory or Path.home() / '.local/share/rs05' / args.repository.replace('/', '-')).expanduser().resolve()
@@ -148,8 +153,8 @@ def main():
         return
     require(gh_api('user')['login'] == 'robdor80', 'Configura una vez el acceso de GitHub del propietario')
     # Existing complete setup is idempotent: no local keys, password prompts or secret writes.
-    if configured(args.repository):
-        ensure_environments(args.repository)
+    if configured(args.repository, release_only=args.release_only):
+        ensure_environments(args.repository, release_only=args.release_only)
         print('La aplicación ya está configurada. Publica desde RobPublisher.')
         return
     # Private-key operations are initial owner setup only, never CI or an AI terminal.
@@ -162,7 +167,7 @@ def main():
     releases = [] if historical else gh_api(f'repos/{args.repository}/releases?per_page=100')
     distributed = {channel: any(not release['draft'] and release['prerelease'] == (channel == 'dev') and
                     any(asset['name'].lower().endswith('.apk') for asset in release['assets']) for release in releases)
-                   for channel in ('release', 'dev')}
+                   for channel in channels}
     metadata = directory / 'signing.json'
     public_file = directory / 'public-identities.json'
     public = json.loads(public_file.read_text()) if public_file.is_file() else dict(repository=args.repository, certificates={})
@@ -170,7 +175,7 @@ def main():
     settings = json.loads(metadata.read_text()) if metadata.is_file() else {}
     directory.mkdir(parents=True, exist_ok=True, mode=0o700)
     # A partial existing setup may be recovered only from the same local identities/imports.
-    for channel in ('release', 'dev'):
+    for channel in channels:
         store = directory / (channel + '.p12')
         imported = getattr(args, 'import_' + channel + '_keystore')
         require(not ('android-' + channel in existing and not store.exists() and not imported),
@@ -203,9 +208,9 @@ def main():
         public['certificates'][channel] = pin
         metadata.write_text(json.dumps(settings)); metadata.chmod(0o600)
         public_file.write_text(json.dumps(public, indent=2) + '\n')
-    ensure_environments(args.repository)
-    check_existing_identities(args.repository, public)
-    for channel in ('release', 'dev'):
+    ensure_environments(args.repository, release_only=args.release_only)
+    check_existing_identities(args.repository, public, release_only=args.release_only)
+    for channel in channels:
         name = 'android-' + channel
         values = dict(SIGNING_KEYSTORE_B64=base64.b64encode((directory / (channel + '.p12')).read_bytes()).decode(),
                       SIGNING_STORE_PASSWORD=settings[channel]['password'])

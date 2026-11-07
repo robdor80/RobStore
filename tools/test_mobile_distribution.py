@@ -73,6 +73,32 @@ class MobilePolicyTests(unittest.TestCase):
             self.assertEqual(value['wait_timer'], 0)
         self.assertFalse(any('/secrets' in path or '/variables' in path for path, _, _ in calls))
 
+    def test_release_only_setup_needs_no_dev_environment(self):
+        def api(path, method='GET', value=None):
+            if path.endswith('/environments'):
+                return {'environments': [{'name': 'android-release'}, {'name': 'android-publish'}]}
+            if path.endswith('/android-release/secrets'):
+                return {'secrets': [{'name': name} for name in ('SIGNING_KEYSTORE_B64', 'SIGNING_STORE_PASSWORD')]}
+            if path.endswith('/android-release/variables'):
+                return {'variables': [{'name': 'CERTIFICATE_SHA256', 'value': 'a' * 64}]}
+            raise AssertionError('Unexpected GitHub API lookup: ' + path)
+        with patch.object(owner_setup, 'gh_api', side_effect=api):
+            self.assertTrue(owner_setup.configured(REPO, release_only=True))
+            self.assertFalse(owner_setup.configured(REPO))
+
+    def test_release_only_creates_no_dev_environment(self):
+        calls = []
+        def api(path, method='GET', value=None):
+            calls.append((path, method, value))
+            return {'environments': []} if method == 'GET' else {}
+        with patch.object(owner_setup, 'gh_api', side_effect=api), patch.object(m, 'protected_environment'):
+            owner_setup.ensure_environments(REPO, release_only=True)
+        writes = [path for path, method, _ in calls if method == 'PUT']
+        self.assertEqual(len(writes), 2)
+        self.assertTrue(any(path.endswith('/android-release') for path in writes))
+        self.assertTrue(any(path.endswith('/android-publish') for path in writes))
+        self.assertFalse(any('/android-dev' in path for path, _, _ in calls))
+
     def test_migration_has_no_password_keystore_or_secret_operations(self):
         with patch('sys.argv', ['setup', '--repository', REPO, '--environments-only']), \
                 patch.object(owner_setup, 'gh_api', return_value=dict(login='robdor80')), \
@@ -80,7 +106,7 @@ class MobilePolicyTests(unittest.TestCase):
                 patch.object(owner_setup.getpass, 'getpass', side_effect=AssertionError('No password prompt')), \
                 patch.object(owner_setup, 'command', side_effect=AssertionError('No key or secret commands')):
             owner_setup.main()
-        configure.assert_called_once_with(REPO)
+        configure.assert_called_once_with(REPO, release_only=False)
 
     def test_setup_never_overwrites_existing_signing_secrets(self):
         values = dict(SIGNING_KEYSTORE_B64='fixture', SIGNING_ALIAS='fixture')
@@ -141,7 +167,7 @@ class MobilePolicyTests(unittest.TestCase):
                 patch.object(owner_setup.getpass, 'getpass', side_effect=AssertionError('No passwords')), \
                 patch.object(owner_setup, 'command', side_effect=AssertionError('No keys')):
             owner_setup.main()
-        configure.assert_called_once_with(REPO)
+        configure.assert_called_once_with(REPO, release_only=False)
 
     def test_initial_keys_never_enter_agent_terminal(self):
         with patch.dict(os.environ, CODEX_THREAD_ID='fixture'), \
