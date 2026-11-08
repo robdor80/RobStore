@@ -32,7 +32,7 @@ internal class DownloadFiles(root: File,
         return File(directory, "${UUID.randomUUID()}.part")
     }
     fun space(required: Long) {
-        if (available(directory) < required + RESERVE) throw IOException("Espacio privado insuficiente. Libera espacio y reintenta.")
+        if (available(directory) < required + RESERVE) throw InsufficientDownloadStorage()
     }
     fun receive(app: ReleaseArtifact, client: BinaryClient, cancellation: DownloadCancellation,
         progress: (Long, Long) -> Unit): File {
