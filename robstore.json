@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "name": "RobStore",
+  "description": "Catálogo personal de aplicaciones Android de Roberto Dorado.",
+  "packageName": "es.robertodorado.robstore",
+  "icon": "robstore/icon.png",
+  "apkAssetName": "Android-release.apk",
+  "versionCode": 3,
+  "versionName": "0.1.2"
+}

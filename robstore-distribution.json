@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "sourceCommit": "eda0519b57bf81e2479d5349461689eef59b0b4e",
+  "channel": "release",
+  "certificateSha256": "3e26bb5d68d20c667a55827ea9d382987c75628b210990fd9d63f203d43eb5a4",
+  "apkSha256": "cdf6ff812e9d3a147c75d1fe151529d44329f37148db5c3dac23337fad492f62",
+  "repository": "robdor80/RobStore",
+  "preparationRun": "42464023125",
+  "tag": "v0.1.2-3"
+}
