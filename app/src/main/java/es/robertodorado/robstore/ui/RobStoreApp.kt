@@ -275,7 +275,6 @@ internal fun SettingsScreen(onBack: () -> Unit, state: CatalogState = CatalogSta
     githubAuth: GitHubAuthState = GitHubAuthState(), onConnectGitHub: () -> Unit = {},
     onCancelGitHub: () -> Unit = {}, onDisconnectGitHub: () -> Unit = {}) {
     Screen(stringResource(R.string.settings), onBack = onBack) {
-        GitHubConnectionSection(githubAuth, onConnectGitHub, onCancelGitHub, onDisconnectGitHub)
         SelfUpdateSection(selfUpdate, download, onCheck, onDownload, onCancel, onConfirm, onInstall, onPermission)
         RobCard {
             RobSectionHeader(stringResource(R.string.origin_heading))
@@ -283,6 +282,7 @@ internal fun SettingsScreen(onBack: () -> Unit, state: CatalogState = CatalogSta
             Text(stringResource(R.string.origin_topic, CatalogPolicy.TOPIC))
             Text(stringResource(R.string.stable_channel))
         }
+        GitHubConnectionSection(githubAuth, onConnectGitHub, onCancelGitHub, onDisconnectGitHub)
         RobCard {
             RobSectionHeader(stringResource(R.string.sync_heading))
             RobSyncIndicator(state, technical = true)
