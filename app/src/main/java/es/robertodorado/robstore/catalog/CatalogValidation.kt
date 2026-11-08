@@ -35,7 +35,7 @@ internal object CatalogValidation {
 
     fun select(snapshot: CatalogSnapshot?, repositoryId: Long): CatalogApp {
         if (snapshot == null || !snapshot(snapshot)) throw InvalidMetadata("Catálogo inválido; vuelve a comprobarlo.")
-        return snapshot.apps.singleOrNull { it.repositoryId == repositoryId }
+        return snapshot.apps.singleOrNull { it.repositoryId == repositoryId && !isStoreCatalogEntry(it) }
             ?: throw InvalidMetadata("La aplicación no pertenece al catálogo actual.")
     }
 }
