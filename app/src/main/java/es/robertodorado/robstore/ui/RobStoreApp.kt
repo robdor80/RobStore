@@ -31,6 +31,7 @@ import java.time.Clock
 import kotlinx.coroutines.delay
 import es.robertodorado.robstore.R
 import es.robertodorado.robstore.catalog.*
+import es.robertodorado.robstore.auth.GitHubAuthState
 import es.robertodorado.robstore.download.*
 import es.robertodorado.robstore.inventory.*
 import es.robertodorado.robstore.update.*
@@ -54,7 +55,9 @@ fun RobStoreApp(nav: NavHostController = rememberNavController(), state: Catalog
     onInstall: (Long) -> Unit = {}, onPermission: () -> Unit = {},
     installed: Map<Long, CatalogApplicationStatus> = emptyMap(), onOpen: (Long) -> Unit = {}, openMessage: String? = null,
     selfUpdate: SelfUpdateState = SelfUpdateState(), onCheckSelfUpdate: () -> Unit = {},
-    onDownloadSelfUpdate: () -> Unit = {}, onInstallSelfUpdate: () -> Unit = {}) {
+    onDownloadSelfUpdate: () -> Unit = {}, onInstallSelfUpdate: () -> Unit = {},
+    githubAuth: GitHubAuthState = GitHubAuthState(), onConnectGitHub: () -> Unit = {},
+    onCancelGitHub: () -> Unit = {}, onDisconnectGitHub: () -> Unit = {}) {
     NavHost(navController = nav, startDestination = RobRoutes.Home) {
         composable(RobRoutes.Home) {
             HomeScreen(onSettings = { nav.navigate(RobRoutes.Settings) { launchSingleTop = true } },
@@ -64,7 +67,9 @@ fun RobStoreApp(nav: NavHostController = rememberNavController(), state: Catalog
         }
         composable(RobRoutes.Settings) { SettingsScreen(onBack = { nav.popBackStack() }, state = state, selfUpdate = selfUpdate,
             download = download, onCheck = onCheckSelfUpdate, onDownload = onDownloadSelfUpdate,
-            onCancel = onCancel, onConfirm = onConfirm, onInstall = onInstallSelfUpdate, onPermission = onPermission) }
+            onCancel = onCancel, onConfirm = onConfirm, onInstall = onInstallSelfUpdate, onPermission = onPermission,
+            githubAuth = githubAuth, onConnectGitHub = onConnectGitHub, onCancelGitHub = onCancelGitHub,
+            onDisconnectGitHub = onDisconnectGitHub) }
         composable(RobRoutes.AppDetail, arguments = listOf(navArgument("appId") { type = NavType.StringType })) { entry ->
             val id = entry.arguments?.getString("appId")?.toLongOrNull()
             AppDetailScreen(onBack = { nav.popBackStack() }, app = state.snapshot?.apps?.find { it.repositoryId == id }, state = state,
@@ -266,8 +271,11 @@ internal fun RobSyncIndicator(state: CatalogState, technical: Boolean = false, c
 fun SettingsScreen(onBack: () -> Unit, state: CatalogState = CatalogState(loading = false),
     selfUpdate: SelfUpdateState = SelfUpdateState(), download: DownloadState = DownloadState(),
     onCheck: () -> Unit = {}, onDownload: () -> Unit = {}, onCancel: () -> Unit = {},
-    onConfirm: () -> Unit = {}, onInstall: () -> Unit = {}, onPermission: () -> Unit = {}) {
+    onConfirm: () -> Unit = {}, onInstall: () -> Unit = {}, onPermission: () -> Unit = {},
+    githubAuth: GitHubAuthState = GitHubAuthState(), onConnectGitHub: () -> Unit = {},
+    onCancelGitHub: () -> Unit = {}, onDisconnectGitHub: () -> Unit = {}) {
     Screen(stringResource(R.string.settings), onBack = onBack) {
+        GitHubConnectionSection(githubAuth, onConnectGitHub, onCancelGitHub, onDisconnectGitHub)
         SelfUpdateSection(selfUpdate, download, onCheck, onDownload, onCancel, onConfirm, onInstall, onPermission)
         RobCard {
             RobSectionHeader(stringResource(R.string.origin_heading))
