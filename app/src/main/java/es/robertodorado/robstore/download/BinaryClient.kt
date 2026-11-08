@@ -9,6 +9,7 @@ import okhttp3.*
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 
 internal class DownloadSecurity(message: String) : IOException(message)
+internal class DownloadHttpFailure(val status: Int) : IOException("HTTP $status en descarga de APK")
 
 /** Explicit allowlist, never suffix matching. CDN queries are accepted only after an official redirect. */
 internal object BinaryOrigin {
