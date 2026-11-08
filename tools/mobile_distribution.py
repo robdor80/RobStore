@@ -250,7 +250,11 @@ def signing_preflight(store):
         'KEY_PASSWORD': 'SIGNING_KEY_PASSWORD no desbloquea la clave privada existente (si no está definido se usa SIGNING_STORE_PASSWORD).',
     }
     if result.returncode:
-        raise ValueError(errors.get(result.stderr.strip(), 'No se pudo ejecutar el diagnóstico Java del keystore en el runner.') +
+        # JVM launch notices (e.g. JAVA_TOOL_OPTIONS) can precede our fixed code.
+        # Never echo them: they may include private runtime options.
+        codes = [line.strip() for line in result.stderr.splitlines() if line.strip() in errors]
+        reason = errors[codes[0]] if len(codes) == 1 else 'No se pudo ejecutar el diagnóstico Java del keystore en el runner.'
+        raise ValueError(reason +
                          ' Corregir únicamente el secreto indicado en el mismo entorno; no regenerar la clave Release.')
     os.environ['SIGNING_ALIAS'] = base64.b64decode(result.stdout, validate=True).decode('utf-8')
     print('Signing preflight: keystore JKS/PKCS12, alias, contraseñas y certificado histórico verificados.')
