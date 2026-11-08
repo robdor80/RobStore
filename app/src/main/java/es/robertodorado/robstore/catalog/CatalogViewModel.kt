@@ -35,7 +35,7 @@ class CatalogViewModel internal constructor(
     )
     private val cache = FileCatalogCache(File(application.filesDir, "catalog"))
     private val auth = GitHubAuthManager(GitHubCredentialStore(application))
-    val githubAuthState = auth.state
+    internal val githubAuthState = auth.state
     private var authorizationJob: Job? = null
     private val client = GitHubClient(GitHubAuthenticatedTransport(CatalogRuntime.transportFactory(), auth), cache)
     private val repository = CatalogRepository(cache, client, io = io)
