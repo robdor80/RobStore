@@ -57,16 +57,16 @@ internal class SelfUpdateDiscovery(private val client: GitHubClient, private val
             ?: throw InvalidMetadata("Publicaciones ambiguas para versionCode")
     }
 
-    fun revalidate(candidate: SelfUpdateCandidate) {
-        if (!candidate.valid()) throw InvalidMetadata("Actualización propia no válida")
+    fun revalidate(selected: SelfUpdateCandidate) {
+        if (!selected.valid()) throw InvalidMetadata("Actualización propia no válida")
         val session = client.discovery()
         val repositoryId = verifiedRepository(session)
         // Solo la Release elegida necesita revisarse otra vez. Leer los contratos de
         // todas las Releases históricas en cada fase agotaba la cuota anónima de GitHub.
         // La firma, hash, contrato y versión siguen validándose antes de instalar.
-        val release = session.releases("RobStore").singleOrNull { it.long("id") == candidate.release.id }
+        val release = session.releases("RobStore").singleOrNull { it.long("id") == selected.release.id }
             ?: throw InvalidMetadata("La Release seleccionada ya no está publicada")
-        if (candidate(session, repositoryId, release, candidate.channel) != candidate) {
+        if (candidate(session, repositoryId, release, selected.channel) != selected) {
             throw InvalidMetadata("La Release o el contrato de actualización ha cambiado")
         }
     }
