@@ -56,17 +56,24 @@ jobs:
       - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
         with:
           distribution: temurin
-          java-version: '17'
+          # Robolectric release tests need 21; Gradle itself remains on 17.
+          java-version: |
+            21
+            17
       - uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd # v4.0.4
         with:
           cmdline-tools-version: '13114758'
           packages: platform-tools
           log-accepted-android-sdk-licenses: false
       - run: sdkmanager 'platforms;android-36' 'build-tools;35.0.0'
-      - name: Compile without signing secrets
+      - name: Prepare Gradle wrapper without signing secrets
         working-directory: source
         run: |
           chmod +x gradlew
+          ./gradlew --version
+      - name: Compile without signing secrets
+        working-directory: source
+        run: |
           python3 ../engine/tools/mobile_distribution.py unsigned --source "$SOURCE_SHA" --channel "$CHANNEL" --directory "$RUNNER_TEMP/unsigned"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:

@@ -69,6 +69,9 @@ jobs:
             verify_args=()
           fi
           python3 tools/verify_rs04_apks.py "${verify_args[@]}"
+      - name: Reproduce RS-05 unsigned Release build without secrets
+        run: |
+          ./gradlew -I tools/unsigned-distribution.gradle :app:testReleaseUnitTest :app:lintRelease :app:assembleRelease --no-daemon --no-configuration-cache --no-build-cache
       - name: Summarize audit evidence
         if: always()
         run: |
