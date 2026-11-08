@@ -21,6 +21,15 @@ class ApkVerifierTest {
         val partial = files.partial().also { it.writeBytes(bytes) }
         return PreparedApk.verify(partial, app, files, inspector, token, TEST_NOW) to files
     }
+    @Test fun declaredVersionNameMustMatchArchiveAndMismatchDeletesPartial() {
+        val app = preparedApp().let { it.copy(release = it.release.copy(versionName = "official-version")) }
+        val files = DownloadFiles(temp.newFolder())
+        val partial = files.partial().also { it.writeBytes(APK_BYTES) }
+        assertThrows(DownloadSecurity::class.java) {
+            PreparedApk.verify(partial, app, files, fakeInspector(), DownloadCancellation(), TEST_NOW)
+        }
+        assertFalse(partial.exists())
+    }
     @Test fun declaredVersionCodeMustMatchArchiveAndMismatchDeletesPartial() {
         for (code in listOf(1L, 2L)) {
             val files = DownloadFiles(temp.newFolder())

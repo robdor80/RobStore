@@ -34,4 +34,11 @@ class DownloadFailureMessagesTest {
         assertFalse(message.contains("private.example"))
         assertFalse(message.contains("/data/user"))
     }
+    @Test fun incompleteIntegritySessionAndConnectionErrorsHaveSpecificRecoveryActions() {
+        assertTrue(downloadFailureMessage(IncompleteDownload()).contains("incompleto"))
+        assertTrue(downloadFailureMessage(DownloadIntegrity()).contains("SHA-256 oficial"))
+        assertTrue(downloadFailureMessage(GitHubFailure(401)).contains("Conecta de nuevo"))
+        assertTrue(downloadFailureMessage(java.net.ConnectException()).contains("Comprueba Internet"))
+        assertTrue(downloadFailureMessage(javax.net.ssl.SSLHandshakeException("SECRET")).contains("conexión segura"))
+    }
 }

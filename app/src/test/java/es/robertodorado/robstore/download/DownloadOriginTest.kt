@@ -77,6 +77,7 @@ class DownloadOriginTest {
         client.open(downloadApp(), DownloadCancellation()).use { assertEquals(3L, it.length) }
         assertEquals(2, requests.size)
         assertTrue(requests.all { it.header("Authorization") == null && it.header("Cookie") == null })
+        assertTrue(requests.all { it.header("Cache-Control") == "no-cache" })
     }
     @Test fun unknownRedirectsAreBlockedBeforeRequest() {
         for (host in listOf("evil.test", "githubusercontent.com", "evilgithubusercontent.com", "x.objects.githubusercontent.com", "github.com")) {

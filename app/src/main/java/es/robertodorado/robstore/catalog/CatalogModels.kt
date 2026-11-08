@@ -87,5 +87,5 @@ class GitHubFailure(val status: Int, val retryAt: Long = 0) : java.io.IOExceptio
 
 /** RobStore se actualiza exclusivamente desde Ajustes, nunca como app del catálogo. */
 internal fun isStoreCatalogEntry(app: CatalogApp): Boolean =
-    app.repositoryName == "RobStore" ||
+    app.repositoryName.equals("RobStore", ignoreCase = true) ||
         app.packageName in setOf("es.robertodorado.robstore", "es.robertodorado.robstore.debug")

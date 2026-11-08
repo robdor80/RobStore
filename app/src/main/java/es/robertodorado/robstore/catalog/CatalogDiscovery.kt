@@ -16,7 +16,7 @@ internal class CatalogDiscovery(private val client: GitHubClient, private val no
                 val name = repository.string("name")
                 if (!safeRepository(name)) throw InvalidMetadata("Nombre de repositorio incorrecto")
                 // La tienda tiene su propio canal de actualización; no consume cuota del catálogo.
-                if (name == "RobStore") continue
+                if (name.equals("RobStore", ignoreCase = true)) continue
                 val repoUrl = "https://github.com/${CatalogPolicy.OWNER}/$name"
                 if (repository.string("html_url") != repoUrl) throw InvalidMetadata("Origen del repositorio incorrecto")
                 val app = application(session, id, name, repoUrl)

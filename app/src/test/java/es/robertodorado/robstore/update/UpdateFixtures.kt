@@ -25,6 +25,9 @@ internal class UpdateTransport : HttpTransport {
         val path = request.url.encodedPath
         return when {
             path == "/repos/robdor80/RobStore" -> HttpResult(200, repo.toString().toByteArray())
+            Regex("/repos/robdor80/RobStore/releases/[0-9]+").matches(path) ->
+                releases.singleOrNull { it.long("id").toString() == path.substringAfterLast('/') }
+                    ?.let { HttpResult(200, it.toString().toByteArray()) } ?: HttpResult(404)
             path.endsWith("/releases") -> HttpResult(200, JsonArray(releases).toString().toByteArray())
             path.endsWith("/assets") -> HttpResult(200, JsonArray(assets).toString().toByteArray())
             path.endsWith("/robstore-update.json") -> manifest?.let { HttpResult(200, it) } ?: HttpResult(404)

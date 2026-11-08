@@ -1,6 +1,7 @@
 package es.robertodorado.robstore.catalog
 
 import java.io.IOException
+import es.robertodorado.robstore.download.downloadFailureMessage
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -68,7 +69,7 @@ internal class CatalogRepository(
                 val old = mutableState.value.snapshot
                 mutableState.value = mutableState.value.copy(refreshing = false, loading = false,
                     stale = old != null && expired(old), failed = true,
-                    message = failure.message ?: "No se pudo actualizar el catálogo. Comprueba la conexión.",
+                    message = downloadFailureMessage(failure),
                     nextRefreshAt = manualBlockedUntil())
             }
         } finally { mutex.unlock() }

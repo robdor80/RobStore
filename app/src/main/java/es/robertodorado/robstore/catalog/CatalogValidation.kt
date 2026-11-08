@@ -17,7 +17,7 @@ internal object CatalogValidation {
     }
 
     fun app(app: CatalogApp): Boolean = try {
-        app.repositoryId > 0 && safeRepository(app.repositoryName) &&
+        !isStoreCatalogEntry(app) && app.repositoryId > 0 && safeRepository(app.repositoryName) &&
             app.repositoryUrl == "https://github.com/${CatalogPolicy.OWNER}/${app.repositoryName}" &&
             app.name.isNotBlank() && safeText(app.name, 120) && safeText(app.description, 4000) &&
             safePackageName(app.packageName) && app.release.id > 0 && safeTag(app.release.tag) &&

@@ -24,7 +24,13 @@ internal class GitHubClient(
         fun releases(repository: String): List<JsonObject> = pages(apiUrl("repos/${CatalogPolicy.OWNER}/$repository/releases"))
         fun assets(repository: String, releaseId: Long): List<JsonObject> = pages(apiUrl("repos/${CatalogPolicy.OWNER}/$repository/releases/$releaseId/assets"))
         fun repository(repository: String): JsonObject {
-            val bytes = request(apiUrl("repos/${CatalogPolicy.OWNER}/$repository"), CatalogPolicy.MAX_RESPONSE_BYTES)!!
+            return objectAt("repos/${CatalogPolicy.OWNER}/$repository")
+        }
+        fun release(repository: String, releaseId: Long): JsonObject =
+            objectAt("repos/${CatalogPolicy.OWNER}/$repository/releases/$releaseId")
+
+        private fun objectAt(path: String): JsonObject {
+            val bytes = request(apiUrl(path), CatalogPolicy.MAX_RESPONSE_BYTES)!!
             try {
                 val text = bytes.decodeToString(throwOnInvalidSequence = true)
                 if (!boundedJsonNesting(text)) throw InvalidMetadata("JSON incorrecto")
@@ -77,7 +83,8 @@ internal class GitHubClient(
         if (gate.blockedUntil > time) throw GitHubFailure(429, gate.blockedUntil)
         val key = url.toString()
         val previous = conditional[key]
-        val headers = mutableMapOf("Accept" to if (raw) "application/vnd.github.raw+json" else "application/vnd.github+json")
+        val headers = mutableMapOf("Accept" to if (raw) "application/vnd.github.raw+json" else "application/vnd.github+json",
+            "Cache-Control" to "no-cache")
         previous?.let { headers["If-None-Match"] = it.etag }
         val response = transport.execute(HttpRequest(url, headers, limit))
         val limited = response.status == 429 || response.status == 403

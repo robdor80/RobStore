@@ -64,8 +64,8 @@ internal class SelfUpdateDiscovery(private val client: GitHubClient, private val
         // Solo la Release elegida necesita revisarse otra vez. Leer los contratos de
         // todas las Releases históricas en cada fase agotaba la cuota anónima de GitHub.
         // La firma, hash, contrato y versión siguen validándose antes de instalar.
-        val release = session.releases("RobStore").singleOrNull { it.long("id") == selected.release.id }
-            ?: throw InvalidMetadata("La Release seleccionada ya no está publicada")
+        val release = session.release("RobStore", selected.release.id)
+        if (release.long("id") != selected.release.id) throw InvalidMetadata("Identidad de Release incorrecta")
         if (candidate(session, repositoryId, release, selected.channel) != selected) {
             throw InvalidMetadata("La Release o el contrato de actualización ha cambiado")
         }

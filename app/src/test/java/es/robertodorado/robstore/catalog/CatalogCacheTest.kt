@@ -1,6 +1,7 @@
 package es.robertodorado.robstore.catalog
 
 import java.io.File
+import kotlinx.serialization.encodeToString
 import org.junit.Assert.*
 import org.junit.Rule
 import org.junit.Test
@@ -30,10 +31,34 @@ class CatalogCacheTest {
             apk = app.apk.copy(downloadUrl = "https://github.com/robdor80/RobStore/releases/download/edition-october/app-release.apk"),
             icon = app.icon?.copy(repository = "RobStore"))
         val cached = original.copy(apps = listOf(app, store))
-        assertTrue(CatalogValidation.snapshot(cached))
-        cache.save(cached)
+        assertFalse(CatalogValidation.snapshot(cached))
+        File(directory, "catalog-v1.json").writeText(catalogJson.encodeToString(cached))
         assertEquals(listOf(app), FileCatalogCache(directory).load()!!.apps)
+        assertFalse(File(directory, "catalog-v1.json").readText().contains("es.robertodorado.robstore\""))
         assertThrows(InvalidMetadata::class.java) { CatalogValidation.select(cached, store.repositoryId) }
+    }
+    @Test fun bothStorePackagesAndRepositoryAliasesAreExcludedAtEveryCatalogBoundary() {
+        val app = fixtureSnapshot().apps.single()
+        val storeEntries = listOf(app.copy(packageName = "es.robertodorado.robstore"),
+            app.copy(packageName = "es.robertodorado.robstore.debug"), app.copy(repositoryName = "rObStOrE"))
+        val cache = FileCatalogCache(temp.newFolder())
+        for (store in storeEntries) {
+            assertFalse(CatalogValidation.app(store))
+            val snapshot = fixtureSnapshot().copy(apps = listOf(app, store.copy(repositoryId = 200)))
+            cache.save(snapshot)
+            assertEquals(listOf(app), cache.load()!!.apps)
+        }
+    }
+    @Test fun migrationWriteFailureKeepsOtherAppsAndQuotaVisibleOffline() {
+        val directory = temp.newFolder()
+        val cache = FileCatalogCache(directory)
+        val snapshot = fixtureSnapshot()
+        val store = snapshot.apps.single().copy(repositoryId = 200, packageName = "es.robertodorado.robstore.debug")
+        File(directory, "catalog-v1.json").writeText(catalogJson.encodeToString(snapshot.copy(apps = snapshot.apps + store)))
+        cache.saveGate(RefreshGate(TEST_NOW, TEST_NOW + 600_000))
+        File(directory, "catalog-v1.json.tmp").mkdir() // Simulates an unavailable atomic-write destination.
+        assertEquals(snapshot, cache.load())
+        assertEquals(RefreshGate(TEST_NOW, TEST_NOW + 600_000), cache.readGate())
     }
     @Test fun corruptOrUnknownVersionCacheIsIgnored() {
         val directory = temp.newFolder()
