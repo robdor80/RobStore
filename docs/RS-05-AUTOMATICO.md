@@ -3,7 +3,8 @@
 Después del alta inicial: abrir RobPublisher, seleccionar la aplicación y pulsar
 **Publicar actualización**. GitHub compila, firma con su clave existente y publica
 la Release. La app muestra el progreso en castellano y conserva el seguimiento al
-cerrarse. RobStore encuentra la Release estable mediante su catálogo habitual.
+cerrarse. RobStore encuentra las actualizaciones de otras apps en el catálogo;
+su propia actualización se gestiona exclusivamente desde Ajustes.
 No se necesitan GitHub web, terminales, aprobaciones, contraseñas, etiquetas, hashes
 ni identificadores durante las actualizaciones. Pushes y PR no publican.
 
@@ -35,11 +36,18 @@ Se conservan las comprobaciones automáticas de APK, paquete, certificado origin
 versión creciente, firma Android, subida y contrato para RobStore. La compilación
 no recibe claves. La firma usa `apksigner`; publicar usa el mismo APK firmado.
 Las subidas se reintentan automáticamente. Un fallo persistente conserva un
-borrador; otra orden desde RobPublisher lo retoma sin borrar etiquetas o Releases
-a mano. Una versión ya pública se conserva y nunca se sobrescribe.
+borrador; otra orden desde RobPublisher lo retoma si conserva el mismo código,
+certificado y SHA-256 de APK. Se verifican el cierre original y los archivos ya
+subidos, sin mover la etiqueta ni sobrescribir assets. Sólo puede eliminarse un
+asset vacío cuya subida quedó en estado `starter`. Si cambia la procedencia o hay
+una etiqueta sin borrador verificable, se bloquea la operación y se conserva la
+evidencia; no se recupera forzando etiquetas ni sustituyendo APK. Una versión ya
+pública se conserva y nunca se sobrescribe.
 
-La continuidad con aplicaciones anteriores se obtiene automáticamente del contrato
-más reciente o, durante la primera adopción de RS-05, de sus APK publicados. No se
+La continuidad con aplicaciones anteriores se obtiene automáticamente de todos los
+contratos publicados o, durante la primera adopción de RS-05, de sus APK publicados.
+Cada versión publicada sigue siendo un mínimo de `versionCode`, aunque cambie el
+orden de sus fechas. No se
 exigen registros de aprobación de Releases, IDs de assets, SHA de APK antiguos ni
 que la Release histórica permanezca para siempre en GitHub. Para Cuadrante se
 conservan únicamente su certificado original y su versión mínima conocida. Una
