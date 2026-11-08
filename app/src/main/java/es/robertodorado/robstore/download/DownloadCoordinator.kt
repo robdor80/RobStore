@@ -102,10 +102,10 @@ internal class DownloadCoordinator(
                 partial?.delete(); prepared?.file?.delete(); prepared = null
                 mutableState.value = DownloadState(repositoryId = repositoryId, phase = DownloadPhase.SECURITY_ERROR,
                     message = "La descarga no supera los controles de seguridad. Archivo eliminado.")
-            } catch (_: IOException) {
+            } catch (failure: IOException) {
                 partial?.delete(); prepared?.file?.delete(); prepared = null
                 mutableState.value = DownloadState(repositoryId = repositoryId, phase = if (token.cancelled) DownloadPhase.AVAILABLE else DownloadPhase.ERROR,
-                    message = if (token.cancelled) "Descarga cancelada." else "No se pudo descargar. Comprueba conexión, espacio y disponibilidad; reintenta manualmente.")
+                    message = if (token.cancelled) "Descarga cancelada." else downloadFailureMessage(failure))
             }
         }.also { it.start() }
         return true
