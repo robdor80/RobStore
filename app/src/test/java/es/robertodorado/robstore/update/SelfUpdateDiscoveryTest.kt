@@ -67,6 +67,24 @@ class SelfUpdateDiscoveryTest {
         transport.manifest = updateManifest("versionCode" to JsonPrimitive(3))
         assertThrows(InvalidMetadata::class.java) { discovery().revalidate(candidate) }
     }
+    @Test fun revalidateOnlyReadsChosenContractDespiteHistoricReleases() {
+        val selected = fetch()!!
+        val old = JsonObject(updateRelease() + mapOf(
+            "id" to JsonPrimitive(21),
+            "tag_name" to JsonPrimitive("historical"),
+            "html_url" to JsonPrimitive("https://github.com/robdor80/RobStore/releases/tag/historical")))
+        transport.releases = listOf(old, updateRelease())
+        transport.intercept = { request ->
+            if (request.url.queryParameter("ref") == "refs/tags/historical") {
+                throw AssertionError("Historic contracts must not be re-read during update")
+            }
+            null
+        }
+        transport.requests.clear()
+        discovery().revalidate(selected)
+        assertEquals(1, transport.requests.count { it.url.encodedPath.endsWith("robstore-update.json") })
+        assertEquals(1, transport.requests.count { it.url.encodedPath.endsWith("/assets") })
+    }
     @Test fun codeRatherThanTagOrPublicationDateSelectsNewest() {
         val older = JsonObject(updateRelease() + mapOf("id" to JsonPrimitive(21), "tag_name" to JsonPrimitive("v999"),
             "html_url" to JsonPrimitive("https://github.com/robdor80/RobStore/releases/tag/v999")))
