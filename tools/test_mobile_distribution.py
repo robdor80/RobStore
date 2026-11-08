@@ -63,6 +63,8 @@ class MobilePolicyTests(unittest.TestCase):
         calls = []
         def api(path, method='GET', value=None):
             calls.append((path, method, value))
+            if path.endswith('/deployment-branch-policies') and method == 'GET':
+                return dict(branch_policies=[])
             return dict(environments=[]) if method == 'GET' else {}
         with patch.object(owner_setup, 'gh_api', side_effect=api), patch.object(m, 'protected_environment'):
             owner_setup.ensure_environments(REPO)
@@ -90,6 +92,8 @@ class MobilePolicyTests(unittest.TestCase):
         calls = []
         def api(path, method='GET', value=None):
             calls.append((path, method, value))
+            if path.endswith('/deployment-branch-policies') and method == 'GET':
+                return {'branch_policies': []}
             return {'environments': []} if method == 'GET' else {}
         with patch.object(owner_setup, 'gh_api', side_effect=api), patch.object(m, 'protected_environment'):
             owner_setup.ensure_environments(REPO, release_only=True)
@@ -98,6 +102,62 @@ class MobilePolicyTests(unittest.TestCase):
         self.assertTrue(any(path.endswith('/android-release') for path in writes))
         self.assertTrue(any(path.endswith('/android-publish') for path in writes))
         self.assertFalse(any('/android-dev' in path for path, _, _ in calls))
+
+    def test_workflow_created_empty_environment_is_not_a_release_key(self):
+        calls = []
+        def api(path, method='GET', value=None):
+            calls.append(path)
+            if path.endswith('/android-publish/variables') or path.endswith('/android-release/variables'):
+                return {'variables': []}
+            if path.endswith('/android-release/secrets'):
+                return {'secrets': []}
+            raise AssertionError('Unexpected remote read: ' + path)
+        with patch.object(owner_setup, 'gh_api', side_effect=api):
+            recorded = owner_setup.recorded_signing_identities(
+                REPO, ('release',), {'android-release', 'android-publish'})
+        self.assertFalse(recorded['release'])
+        self.assertFalse(any('android-dev' in p for p in calls))
+
+    def test_existing_secret_or_certificate_pin_prevents_new_key(self):
+        def api(path, method='GET', value=None):
+            if path.endswith('/android-release/secrets'):
+                return {'secrets': [{'name': 'SIGNING_KEYSTORE_B64'}]}
+            if path.endswith('/android-release/variables') or path.endswith('/android-publish/variables'):
+                return {'variables': []}
+            raise AssertionError('Unexpected remote read: ' + path)
+        with patch.object(owner_setup, 'gh_api', side_effect=api):
+            recorded = owner_setup.recorded_signing_identities(
+                REPO, ('release',), {'android-release', 'android-publish'})
+        self.assertTrue(recorded['release'])
+
+        def pinned(path, method='GET', value=None):
+            if path.endswith('/android-publish/variables'):
+                return {'variables': [{'name': 'RELEASE_CERTIFICATE_SHA256', 'value': 'a' * 64}]}
+            if path.endswith('/android-release/secrets'):
+                return {'secrets': []}
+            if path.endswith('/android-release/variables'):
+                return {'variables': []}
+            raise AssertionError('Unexpected remote read: ' + path)
+        with patch.object(owner_setup, 'gh_api', side_effect=pinned):
+            recorded = owner_setup.recorded_signing_identities(
+                REPO, ('release',), {'android-release', 'android-publish'})
+        self.assertTrue(recorded['release'])
+
+    def test_existing_workflow_environment_without_main_policy_is_repaired(self):
+        calls = []
+        def api(path, method='GET', value=None):
+            calls.append((path, method, value))
+            if path.endswith('/environments'):
+                return {'environments': [{'name': 'android-release'}, {'name': 'android-publish'}]}
+            if path.endswith('/deployment-branch-policies'):
+                return {'branch_policies': []} if method == 'GET' else {}
+            return {}
+        with patch.object(owner_setup, 'gh_api', side_effect=api), patch.object(m, 'protected_environment'):
+            owner_setup.ensure_environments(REPO, release_only=True)
+        added = [(path, value) for path, method, value in calls if method == 'POST']
+        self.assertEqual(len(added), 2)
+        self.assertTrue(all(path.endswith('/deployment-branch-policies') and value == {'name': 'main', 'type': 'branch'}
+                            for path, value in added))
 
     def test_migration_has_no_password_keystore_or_secret_operations(self):
         with patch('sys.argv', ['setup', '--repository', REPO, '--environments-only']), \
@@ -119,6 +179,8 @@ class MobilePolicyTests(unittest.TestCase):
         calls = []
         def api(path, method='GET', value=None):
             calls.append((path, method, value))
+            if path.endswith('/deployment-branch-policies'):
+                return dict(branch_policies=[dict(name='main', type='branch')])
             return dict(environments=[dict(name='android-' + c) for c in ('release', 'dev', 'publish')])
         with patch.object(owner_setup, 'gh_api', side_effect=api), patch.object(m, 'protected_environment'):
             owner_setup.ensure_environments(REPO)

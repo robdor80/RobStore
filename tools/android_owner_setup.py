@@ -93,8 +93,16 @@ def ensure_environments(repo, release_only=False):
         # Updating environment protection preserves secrets, variables and branch rules.
         gh_api(f'repos/{repo}/environments/{name}', 'PUT', dict(prevent_self_review=False, wait_timer=0,
                reviewers=[], deployment_branch_policy=dict(protected_branches=False, custom_branch_policies=True)))
-        if name not in existing:
-            gh_api(f'repos/{repo}/environments/{name}/deployment-branch-policies', 'POST', dict(name='main', type='branch'))
+        branch_url = f'repos/{repo}/environments/{name}/deployment-branch-policies'
+        policies = gh_api(branch_url)['branch_policies']
+        if not policies:
+            # GitHub Actions can create an empty environment before its first owner setup.
+            # Give that environment the same main-only policy as a newly created one.
+            gh_api(branch_url, 'POST', dict(name='main', type='branch'))
+        else:
+            require(len(policies) == 1 and policies[0]['name'] == 'main' and
+                    policies[0]['type'] == 'branch',
+                    'Existing environment has unexpected branch policies; no changes made')
         from mobile_distribution import protected_environment
         protected_environment(repo, name)
 
@@ -105,6 +113,27 @@ def provision_signing_secrets(repo, name, values):
     for key, value in values.items():
         if key not in existing:
             command(['gh', 'secret', 'set', key, '--repo', repo, '--env', name], value.encode())
+
+
+def recorded_signing_identities(repo, channels, existing):
+    """Recognize private keys only from stored secrets or certificate pins.
+
+    GitHub Actions creates an environment as soon as a job references it, even
+    if that environment contains no private keys and no identity.
+    """
+    recorded = {}
+    publish_pins = ({item['name']: item['value'] for item in
+                    gh_api(f'repos/{repo}/environments/android-publish/variables')['variables']}
+                    if 'android-publish' in existing else {})
+    for channel in channels:
+        environment = f'repos/{repo}/environments/android-{channel}'
+        has_keys = False
+        if 'android-' + channel in existing:
+            secret_names = {item['name'] for item in gh_api(environment + '/secrets')['secrets']}
+            variable_names = {item['name'] for item in gh_api(environment + '/variables')['variables']}
+            has_keys = bool(secret_names or 'CERTIFICATE_SHA256' in variable_names)
+        recorded[channel] = has_keys or bool(publish_pins.get(channel.upper() + '_CERTIFICATE_SHA256'))
+    return recorded
 
 
 def configured(repo, release_only=False):
@@ -164,6 +193,7 @@ def main():
     from mobile_distribution import legacy_baselines
     historical = legacy_baselines(args.repository)
     existing = {item['name'] for item in gh_api(f'repos/{args.repository}/environments')['environments']}
+    recorded = recorded_signing_identities(args.repository, channels, existing)
     releases = [] if historical else gh_api(f'repos/{args.repository}/releases?per_page=100')
     distributed = {channel: any(not release['draft'] and release['prerelease'] == (channel == 'dev') and
                     any(asset['name'].lower().endswith('.apk') for asset in release['assets']) for release in releases)
@@ -178,8 +208,9 @@ def main():
     for channel in channels:
         store = directory / (channel + '.p12')
         imported = getattr(args, 'import_' + channel + '_keystore')
-        require(not ('android-' + channel in existing and not store.exists() and not imported),
-                'Falta recuperar la clave existente de ' + channel + '; no se generará otra identidad')
+        require(not (recorded[channel] and not store.exists() and not imported),
+                'Hay una identidad de firma registrada para ' + channel +
+                ', pero falta su clave privada local. Recupérala; no se generará otra identidad')
         if (channel == 'release' and historical) or distributed[channel]:
             require(store.exists() or imported, 'Recupera o importa la clave original; generation is forbidden')
         if channel not in settings:
