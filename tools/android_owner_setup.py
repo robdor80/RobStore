@@ -115,6 +115,27 @@ def provision_signing_secrets(repo, name, values):
             command(['gh', 'secret', 'set', key, '--repo', repo, '--env', name], value.encode())
 
 
+def recorded_signing_identities(repo, channels, existing):
+    """Recognize private keys only from stored secrets or certificate pins.
+
+    GitHub Actions creates an environment as soon as a job references it, even
+    if that environment contains no private keys and no identity.
+    """
+    recorded = {}
+    publish_pins = ({item['name']: item['value'] for item in
+                    gh_api(f'repos/{repo}/environments/android-publish/variables')['variables']}
+                    if 'android-publish' in existing else {})
+    for channel in channels:
+        environment = f'repos/{repo}/environments/android-{channel}'
+        has_keys = False
+        if 'android-' + channel in existing:
+            secret_names = {item['name'] for item in gh_api(environment + '/secrets')['secrets']}
+            variable_names = {item['name'] for item in gh_api(environment + '/variables')['variables']}
+            has_keys = bool(secret_names or 'CERTIFICATE_SHA256' in variable_names)
+        recorded[channel] = has_keys or bool(publish_pins.get(channel.upper() + '_CERTIFICATE_SHA256'))
+    return recorded
+
+
 def configured(repo, release_only=False):
     channels = ('release',) if release_only else ('release', 'dev')
     """Only secret names and public pins are read. Private values never leave GitHub."""
@@ -172,21 +193,7 @@ def main():
     from mobile_distribution import legacy_baselines
     historical = legacy_baselines(args.repository)
     existing = {item['name'] for item in gh_api(f'repos/{args.repository}/environments')['environments']}
-    # An unsuccessful workflow may have auto-created android-release with no keys.
-    # Only an actual signing secret or public certificate pin means an identity
-    # already exists and must be recovered rather than replaced.
-    recorded = {}
-    publish_pins = ({item['name']: item['value'] for item in
-                    gh_api(f'repos/{args.repository}/environments/android-publish/variables')['variables']}
-                    if 'android-publish' in existing else {})
-    for channel in channels:
-        environment = f'repos/{args.repository}/environments/android-{channel}'
-        has_keys = False
-        if 'android-' + channel in existing:
-            secret_names = {item['name'] for item in gh_api(environment + '/secrets')['secrets']}
-            variable_names = {item['name'] for item in gh_api(environment + '/variables')['variables']}
-            has_keys = bool(secret_names or 'CERTIFICATE_SHA256' in variable_names)
-        recorded[channel] = has_keys or bool(publish_pins.get(channel.upper() + '_CERTIFICATE_SHA256'))
+    recorded = recorded_signing_identities(args.repository, channels, existing)
     releases = [] if historical else gh_api(f'repos/{args.repository}/releases?per_page=100')
     distributed = {channel: any(not release['draft'] and release['prerelease'] == (channel == 'dev') and
                     any(asset['name'].lower().endswith('.apk') for asset in release['assets']) for release in releases)
