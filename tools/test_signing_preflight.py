@@ -11,6 +11,27 @@ from unittest.mock import patch
 import mobile_distribution as m
 
 
+class PreflightDiagnosticTests(unittest.TestCase):
+    def test_jvm_notice_does_not_hide_fixed_error_or_expose_runtime_options(self):
+        for code, expected in [('STORE_PASSWORD', 'SIGNING_STORE_PASSWORD'), ('ALIAS', 'SIGNING_ALIAS'),
+                               ('KEY_PASSWORD', 'SIGNING_KEY_PASSWORD'), ('CERTIFICATE', 'certificado histórico')]:
+            with self.subTest(code=code), patch.object(subprocess, 'run', return_value=
+                    subprocess.CompletedProcess([], 1, '', 'Picked up JAVA_TOOL_OPTIONS: -Dprivate=SECRET\n' + code + '\n')):
+                with self.assertRaises(ValueError) as raised:
+                    m.signing_preflight(Path('/private/fixture.p12'))
+                self.assertIn(expected, str(raised.exception))
+                self.assertNotIn('SECRET', str(raised.exception))
+                self.assertNotIn('/private', str(raised.exception))
+
+    def test_ambiguous_or_unknown_codes_keep_generic_redacted_diagnostic(self):
+        for output in ('STORE_PASSWORD\nKEY_PASSWORD', 'private exception SECRET'):
+            with self.subTest(output=output), patch.object(subprocess, 'run', return_value=
+                    subprocess.CompletedProcess([], 1, '', output)):
+                with self.assertRaisesRegex(ValueError, 'diagnóstico Java') as raised:
+                    m.signing_preflight(Path('/private/fixture.p12'))
+                self.assertNotIn('SECRET', str(raised.exception))
+
+
 class SigningPreflightTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):

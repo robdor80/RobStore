@@ -248,6 +248,16 @@ class MobilePolicyTests(unittest.TestCase):
         with patch.object(m, 'pages', return_value=[release]), patch.object(m, 'raw_file', return_value=json.dumps(dict(contract, versionCode=1))):
             m.increasing(REPO, contract)
 
+    def test_older_publication_date_cannot_hide_a_higher_version_code(self):
+        contract = dict(channel='release', packageName=d.PACKAGES['release'], versionCode=4)
+        releases = [dict(draft=False, prerelease=False, tag_name='recent', published_at='2026-11-08'),
+                    dict(draft=False, prerelease=False, tag_name='older', published_at='2026-11-01')]
+        def raw(repo, ref, path, **kwargs):
+            return json.dumps(dict(contract, versionCode=3 if ref.endswith('/recent') else 5))
+        with patch.object(m, 'pages', return_value=releases), patch.object(m, 'raw_file', side_effect=raw), \
+                self.assertRaises(ValueError):
+            m.increasing(REPO, contract)
+
     def test_publish_dry_plan_never_writes(self):
         settings = d.load('.github/android-distribution.json')
         contract = dict(channel='release')
@@ -278,7 +288,7 @@ class MobilePolicyTests(unittest.TestCase):
             candidate.assert_not_called()
             api.assert_not_called()
 
-    def publication_fixture(self, upload_fails=False, existing_draft=False):
+    def publication_fixture(self, upload_fails=False, existing_draft=False, tag_moved=False, injected_asset=False):
         with tempfile.TemporaryDirectory(prefix='publish-api-fixture-') as folder:
             root = Path(folder)
             apk = root / 'Android-release.apk'; apk.write_bytes(b'API transaction fixture; not a production APK')
@@ -287,6 +297,14 @@ class MobilePolicyTests(unittest.TestCase):
             (root / 'SHA256SUMS').write_text(f"{contract['sha256']}  {apk.name}\n")
             settings = d.load('.github/android-distribution.json')
             calls = []
+            uploaded_assets = [dict(name='unauthorized.apk')] if injected_asset else []
+            def upload(command, **kwargs):
+                self.assertNotIn('--clobber', command)
+                if not upload_fails:
+                    file = Path(command[4])
+                    uploaded_assets.append(dict(name=file.name, state='uploaded', size=file.stat().st_size,
+                                                digest='sha256:' + d.digest(file)))
+                return subprocess.CompletedProcess(command, 1 if upload_fails else 0)
             def api(path, method='GET', data=None):
                 calls.append((path, method, data))
                 if path.endswith('/git/commits/' + SOURCE):
@@ -308,7 +326,7 @@ class MobilePolicyTests(unittest.TestCase):
                 if path.endswith('/releases'):
                     return dict(id=1, html_url='https://github.com/robdor80/RobStore/releases/tag/v0.1.0')
                 if path.endswith('/releases/1'):
-                    return dict(assets=[dict(name=apk.name, state='uploaded', size=apk.stat().st_size, digest='sha256:' + contract['sha256'])])
+                    return dict(draft=True, prerelease=False, tag_name='v0.1.0', assets=uploaded_assets)
                 raise AssertionError(path)
             def raw(repo, ref, path):
                 return json.dumps(contract) if path == d.CONTRACT else 'Approved fixture notes'
@@ -318,24 +336,26 @@ class MobilePolicyTests(unittest.TestCase):
                     patch.object(m, 'candidate', return_value=(contract, {}, apk)), patch.object(m, 'increasing'), \
                     patch.object(m, 'pages', side_effect=lambda path: ([dict(id=1, tag_name='v0.1.0', draft=True, html_url='fixture-release')] if path.endswith('/releases') else [dict(name='v0.1.0')] if path.endswith('/tags') else []) if existing_draft else []), patch.object(m, 'raw_file', side_effect=raw), \
                     patch.object(m, 'publication_files', return_value={d.CONTRACT: json.dumps(contract)}), \
+                    patch.object(m, 'reusable_closure', return_value='e' * 40), \
+                    patch.object(m, 'publication_commit', return_value=('0' if tag_moved else 'e') * 40), \
                     patch.object(m, 'api', side_effect=api), \
-                    patch.object(subprocess, 'run', return_value=subprocess.CompletedProcess([], 1 if upload_fails else 0)), \
+                    patch.object(subprocess, 'run', side_effect=upload), \
                     patch.object(d, 'run', side_effect=AssertionError('Never rebuild or sign during publication')), patch.object(m.time, 'sleep'), patch('builtins.print'):
-                if upload_fails:
+                if upload_fails or tag_moved or injected_asset:
                     with self.assertRaises(ValueError):
                         m.publish(args)
                 else:
                     m.publish(args)
             writes = [(path, method, data) for path, method, data in calls if method != 'GET']
-            self.assertEqual(next(data['parents'] for path, method, data in writes if path.endswith('/git/commits')), [SOURCE])
             if existing_draft:
-                self.assertTrue(any('/git/refs/tags/' in path and method == 'PATCH' for path, method, _ in writes))
+                self.assertFalse(any('/git/' in path for path, method, _ in writes))
                 self.assertFalse(any(path.endswith('/releases') for path, _, _ in writes))
             else:
+                self.assertEqual(next(data['parents'] for path, method, data in writes if path.endswith('/git/commits')), [SOURCE])
                 self.assertEqual(next(data['ref'] for path, method, data in writes if path.endswith('/git/refs')), 'refs/tags/v0.1.0')
                 self.assertTrue(next(data['draft'] for path, method, data in writes if path.endswith('/releases')))
             finalizations = [data for path, method, data in writes if method == 'PATCH' and data == dict(draft=False)]
-            self.assertEqual(finalizations, [] if upload_fails else [dict(draft=False)])
+            self.assertEqual(finalizations, [] if upload_fails or tag_moved or injected_asset else [dict(draft=False)])
 
     def test_retry_resumes_draft_without_manual_tag_or_release_cleanup(self):
         self.publication_fixture(existing_draft=True)
@@ -345,6 +365,105 @@ class MobilePolicyTests(unittest.TestCase):
 
     def test_failed_upload_keeps_draft_and_never_finalizes(self):
         self.publication_fixture(upload_fails=True)
+
+    def test_tag_changed_during_upload_never_finalizes(self):
+        self.publication_fixture(tag_moved=True)
+
+    def test_unexpected_draft_asset_never_finalizes(self):
+        self.publication_fixture(injected_asset=True)
+
+
+class DraftRecoveryTests(unittest.TestCase):
+    def closure(self, receipt_change=None, code_changed=False, file_changed=False, draft=True):
+        settings = d.load('.github/android-distribution.json')
+        args = argparse.Namespace(source=SOURCE, tag='v0.1.3-4', channel='release')
+        contract = dict(schemaVersion=1, channel='release', packageName=d.PACKAGES['release'],
+                        versionCode=4, versionName='0.1.3', apkAssetName='Android-release.apk', sha256='a' * 64)
+        receipt = dict(schemaVersion=1, sourceCommit=SOURCE, channel='release', certificateSha256='b' * 64,
+                       apkSha256=contract['sha256'], repository=REPO, preparationRun='222', tag=args.tag)
+        previous = dict(receipt, preparationRun='111', **(receipt_change or {}))
+        files = {d.CONTRACT: json.dumps(contract), d.RECEIPT: json.dumps(previous)}
+        commit = 'c' * 40
+        calls = []
+        def api(path, method='GET', data=None):
+            calls.append((path, method))
+            self.assertEqual(method, 'GET')
+            if '/git/ref/' in path:
+                return dict(object=dict(type='tag', sha='d' * 40))
+            if '/git/tags/' in path:
+                return dict(object=dict(type='commit', sha=commit))
+            if '/git/commits/' in path:
+                return dict(parents=[dict(sha=SOURCE)])
+            if '/compare/' in path:
+                return dict(commits=[{}], files=[dict(filename='app/build.gradle.kts' if code_changed else d.CONTRACT, status='modified')])
+            if '/contents/' in path:
+                name = path.split('/contents/')[1].split('?')[0]
+                body = b'altered' if file_changed else files[name].encode()
+                return dict(encoding='base64', content=base64.b64encode(body).decode())
+            raise AssertionError(path)
+        with patch.object(m, 'api', side_effect=api), \
+                patch.object(m, 'raw_file', side_effect=lambda repo, ref, name: files[name]), \
+                patch.object(m, 'publication_files', return_value=files):
+            result = m.reusable_closure(args, settings, contract, receipt,
+                                        dict(draft=True, prerelease=False) if draft else None)
+        self.assertTrue(calls)
+        self.assertEqual(result, commit)
+
+    def test_same_source_signer_and_bytes_reuse_original_immutable_tag(self):
+        self.closure()
+
+    def test_other_source_signer_hash_or_withdrawn_release_never_replaces_tag(self):
+        for change in (dict(sourceCommit='e' * 40), dict(certificateSha256='e' * 64), dict(apkSha256='e' * 64)):
+            with self.subTest(change=change), self.assertRaises(ValueError):
+                self.closure(receipt_change=change)
+        with self.assertRaises(ValueError):
+            self.closure(draft=False)
+
+    def test_changed_closure_or_application_code_blocks_retry(self):
+        for change in (dict(code_changed=True), dict(file_changed=True)):
+            with self.subTest(change=change), self.assertRaises(ValueError):
+                self.closure(**change)
+
+    def upload(self, asset=None, fail_after_upload=False, draft=True):
+        with tempfile.TemporaryDirectory() as folder:
+            file = Path(folder) / 'Android-release.apk'; file.write_bytes(b'exact verified fixture bytes')
+            exact = dict(id=1, name=file.name, state='uploaded', size=file.stat().st_size, digest='sha256:' + d.digest(file))
+            assets = [] if asset is None else [dict(exact, **asset)]
+            calls = []
+            def api(path, method='GET', data=None):
+                calls.append((path, method))
+                if method == 'DELETE':
+                    assets.clear(); return None
+                return dict(draft=draft, tag_name='v0.1.3-4', assets=assets)
+            def upload(command, **kwargs):
+                self.assertNotIn('--clobber', command)
+                assets.append(exact)
+                return subprocess.CompletedProcess(command, 1 if fail_after_upload else 0)
+            with patch.object(m, 'api', side_effect=api), patch.object(subprocess, 'run', side_effect=upload) as run, \
+                    patch.object(m.time, 'sleep'):
+                m.upload_draft_file(REPO, 1, 'v0.1.3-4', file)
+            return calls, run.call_count
+
+    def test_exact_uploaded_asset_is_reused_without_upload_or_delete(self):
+        calls, uploads = self.upload(asset={})
+        self.assertEqual(uploads, 0)
+        self.assertTrue(all(method == 'GET' for _, method in calls))
+
+    def test_lost_upload_response_recovers_without_overwriting_bytes(self):
+        _, uploads = self.upload(fail_after_upload=True)
+        self.assertEqual(uploads, 1)
+
+    def test_only_empty_starter_asset_can_be_removed_for_recovery(self):
+        calls, uploads = self.upload(asset=dict(state='starter', size=0))
+        self.assertEqual(uploads, 1)
+        self.assertEqual(sum(method == 'DELETE' for _, method in calls), 1)
+        for asset in (dict(digest='sha256:' + 'f' * 64), dict(state='starter', size=1)):
+            with self.subTest(asset=asset), self.assertRaises(ValueError):
+                self.upload(asset=asset)
+
+    def test_release_published_during_retry_blocks_upload(self):
+        with self.assertRaises(ValueError):
+            self.upload(draft=False)
 
 
 class MobileSignedTests(unittest.TestCase):

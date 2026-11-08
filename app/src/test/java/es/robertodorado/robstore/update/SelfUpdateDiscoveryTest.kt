@@ -84,6 +84,25 @@ class SelfUpdateDiscoveryTest {
         discovery().revalidate(selected)
         assertEquals(1, transport.requests.count { it.url.encodedPath.endsWith("robstore-update.json") })
         assertEquals(1, transport.requests.count { it.url.encodedPath.endsWith("/assets") })
+        assertTrue(transport.requests.none { it.url.encodedPath.endsWith("/releases") })
+        assertEquals(4, transport.requests.size)
+        assertTrue(transport.requests.all { it.headers["Cache-Control"] == "no-cache" })
+    }
+    @Test fun removedDraftReplacedAndAlteredSelectedPublicationsAreBlocked() {
+        val selected = fetch()!!
+        val originalAssets = transport.assets
+        for (release in listOf(emptyList(), listOf(JsonObject(updateRelease() + ("id" to JsonPrimitive(999)))))) {
+            transport.releases = release
+            assertEquals(404, assertThrows(GitHubFailure::class.java) { discovery().revalidate(selected) }.status)
+        }
+        transport.releases = listOf(updateRelease(draft = true))
+        assertThrows(InvalidMetadata::class.java) { discovery().revalidate(selected) }
+        transport.releases = listOf(updateRelease())
+        for (key in listOf("id", "digest", "size")) {
+            transport.assets = listOf(JsonObject(originalAssets.single() + (key to
+                if (key == "digest") JsonPrimitive("sha256:" + "f".repeat(64)) else JsonPrimitive(999))))
+            assertThrows(InvalidMetadata::class.java) { discovery().revalidate(selected) }
+        }
     }
     @Test fun codeRatherThanTagOrPublicationDateSelectsNewest() {
         val older = JsonObject(updateRelease() + mapOf("id" to JsonPrimitive(21), "tag_name" to JsonPrimitive("v999"),

@@ -84,6 +84,21 @@ class DistributionTests(unittest.TestCase):
                 d.run('signing-tool')
         self.assertNotIn('private sentinel', str(raised.exception))
 
+    def test_gradle_failures_are_classified_without_echoing_private_output(self):
+        cases = [('Cannot find a Java installation matching languageVersion=21', 'Java 21'),
+                 ('UnknownHostException', 'red'), ('There were failing tests', 'pruebas'),
+                 ('Lint found errors', 'Lint'), ('Compilation error', 'código'),
+                 ('Verification of Gradle distribution failed', 'checksum'), ('unclassified', 'CI Android')]
+        for output, expected in cases:
+            with self.subTest(output=output), patch.object(subprocess, 'run', return_value=
+                    subprocess.CompletedProcess([], 1, output, 'SECRET https://private.example /private/path')):
+                with self.assertRaises(ValueError) as raised:
+                    d.run('./gradlew', 'testReleaseUnitTest')
+                self.assertIn(expected, str(raised.exception))
+                self.assertNotIn('SECRET', str(raised.exception))
+                self.assertNotIn('private.example', str(raised.exception))
+                self.assertNotIn('/private/path', str(raised.exception))
+
     def test_apksigner_errors_identify_single_setup_correction_without_disclosing_output(self):
         cases = [('keystore password was incorrect', 'SIGNING_STORE_PASSWORD'),
                  ('java.security.UnrecoverableKeyException: Cannot recover key', 'SIGNING_KEY_PASSWORD'),

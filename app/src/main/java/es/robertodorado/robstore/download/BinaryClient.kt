@@ -8,7 +8,9 @@ import java.util.concurrent.TimeUnit
 import okhttp3.*
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 
-internal class DownloadSecurity(message: String) : IOException(message)
+internal open class DownloadSecurity(message: String) : IOException(message)
+internal class IncompleteDownload : DownloadSecurity("Archivo incompleto.")
+internal class DownloadIntegrity : DownloadSecurity("Integridad incorrecta.")
 internal class DownloadHttpFailure(val status: Int) : IOException("HTTP $status en descarga de APK")
 
 /** Explicit allowlist, never suffix matching. CDN queries are accepted only after an official redirect. */
@@ -40,7 +42,7 @@ internal class DownloadCancellation(private val nanoTime: () -> Long = System::n
     @Synchronized fun cancel() { cancelled = true; active?.cancel() }
     fun check() {
         if (cancelled) throw java.util.concurrent.CancellationException("Descarga cancelada")
-        if (nanoTime() >= deadline) throw IOException("Se agotó el tiempo de la operación.")
+        if (nanoTime() >= deadline) throw java.net.SocketTimeoutException("Se agotó el tiempo de la operación.")
     }
 }
 
@@ -67,7 +69,8 @@ internal class BinaryClient(client: OkHttpClient = OkHttpClient()) {
             if (!seen.add(url.toString())) throw DownloadSecurity("Bucle de redirecciones.")
             // Build fresh headers at every hop; no sensitive headers travel across domains.
             val call = client.newCall(Request.Builder().url(url).header("Accept", "application/octet-stream")
-                .header("Accept-Encoding", "identity").header("User-Agent", "RobStore-Android").build())
+                .header("Accept-Encoding", "identity").header("Cache-Control", "no-cache")
+                .header("User-Agent", "RobStore-Android").build())
             cancellation.attach(call)
             val response = call.execute()
             if (response.code == 200) {

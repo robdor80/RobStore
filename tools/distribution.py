@@ -21,6 +21,28 @@ def require(condition, message):
 def run(*args):
     result = subprocess.run(list(map(str, args)), capture_output=True, text=True)
     if result.returncode:
+        if Path(str(args[0])).name == 'gradlew':
+            # Classify only known markers, never echo output, argv, URLs or environment values.
+            # Applies after the workflow preflight too (tests, compilation and lint).
+            output = result.stdout + result.stderr
+            lower = output.lower()
+            if any(marker in lower for marker in ('no matching toolchains', 'cannot find a java installation',
+                                                  'no locally installed toolchains', 'toolchain download repositories')):
+                reason = 'Falta el JDK requerido. Preparar Java 17 para Gradle y Java 21 para Robolectric.'
+            elif any(marker in lower for marker in ('unknownhostexception', 'could not resolve', 'connect timed out',
+                                                    'read timed out', 'pkix path building failed')):
+                reason = 'No se pudo obtener Gradle o sus dependencias. Revisar red, disponibilidad y confianza TLS del runner.'
+            elif 'there were failing tests' in lower:
+                reason = 'Hay pruebas fallidas. Revisar los informes de tests del build sin secretos.'
+            elif 'lint found' in lower or 'lint infrastructure error' in lower:
+                reason = 'Lint ha bloqueado la compilación. Revisar sus informes del build sin secretos.'
+            elif 'compilation error' in lower or 'compilation failed' in lower:
+                reason = 'La compilación del código ha fallado. Revisar la CI Android del mismo commit.'
+            elif 'verification of gradle distribution failed' in lower:
+                reason = 'El checksum del wrapper no coincide. No desactivar la verificación de Gradle.'
+            else:
+                reason = 'Revisar la CI Android y los informes del build sin secretos; la salida privada se ha omitido.'
+            raise ValueError(f'Gradle falló (exit {result.returncode}). {reason}')
         if Path(str(args[0])).name != 'apksigner':
             raise ValueError('Tool failed: ' + Path(str(args[0])).name)
         # Classify known errors locally; never print argv, paths, tool output or secret values.

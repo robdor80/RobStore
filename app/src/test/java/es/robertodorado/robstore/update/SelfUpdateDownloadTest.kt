@@ -147,4 +147,101 @@ class SelfUpdateDownloadTest {
         assertTrue(files.verifiedDirectory.listFiles().isNullOrEmpty())
         assertFalse(restarted.requestSelfInstall({ true }) { fail("No capability across restart") })
     }
+    @Test fun transientTransferRetriesOnceWithFreshMetadataAndOnlyPublishesCompleteBytes() = runTest {
+        var transfers = 0
+        val controller = coordinator(this, StandardTestDispatcher(testScheduler)) {
+            if (++transfers == 1) binaryResponse(it, APK_BYTES.copyOf(4), length = -1)
+            else binaryResponse(it, APK_BYTES)
+        }
+        controller.startSelfUpdate(); advanceUntilIdle()
+        assertEquals(2, transfers)
+        assertEquals(3, remoteCalls) // initial, before retry, after complete transfer
+        assertEquals(DownloadPhase.OFFICIAL_VERIFIED, controller.state.value.phase)
+        assertArrayEquals(APK_BYTES, files.verifiedDirectory.listFiles()!!.single().readBytes())
+        assertTrue(files.directory.listFiles()!!.none { it.isFile })
+    }
+    @Test fun changedPublicationBeforeRetryPreventsSecondTransfer() = runTest {
+        var transfers = 0
+        remote = { _, _ -> if (++remoteCalls == 2) throw InvalidMetadata("withdrawn") }
+        val controller = coordinator(this, StandardTestDispatcher(testScheduler)) {
+            transfers++; throw java.net.SocketTimeoutException()
+        }
+        controller.startSelfUpdate(); advanceUntilIdle()
+        assertEquals(1, transfers)
+        assertEquals(DownloadPhase.SECURITY_ERROR, controller.state.value.phase)
+        assertTrue(files.directory.listFiles()!!.none { it.isFile })
+    }
+    @Test fun persistentTransientFailureStopsAfterTwoAttemptsAndCanRecoverManually() = runTest {
+        var transfers = 0
+        var fail = true
+        val controller = coordinator(this, StandardTestDispatcher(testScheduler)) {
+            transfers++
+            if (fail) throw java.net.SocketTimeoutException()
+            binaryResponse(it, APK_BYTES)
+        }
+        controller.startSelfUpdate(); advanceUntilIdle()
+        assertEquals(2, transfers)
+        assertEquals(DownloadPhase.ERROR, controller.state.value.phase)
+        fail = false
+        controller.startSelfUpdate(); advanceUntilIdle()
+        assertEquals(DownloadPhase.OFFICIAL_VERIFIED, controller.state.value.phase)
+    }
+    @Test fun quotaStorageAndIntegrityFailuresNeverRetryAutomatically() = runTest {
+        for (status in listOf(403, 404, 429)) {
+            var transfers = 0
+            val controller = coordinator(this, StandardTestDispatcher(testScheduler)) {
+                transfers++; binaryResponse(it, APK_BYTES, code = status)
+            }
+            controller.startSelfUpdate(); advanceUntilIdle()
+            assertEquals(1, transfers)
+            assertEquals(DownloadPhase.ERROR, controller.state.value.phase)
+        }
+        assertFalse(retryableTransfer(InsufficientDownloadStorage()))
+        assertFalse(retryableTransfer(DownloadIntegrity()))
+        assertFalse(retryableTransfer(javax.net.ssl.SSLHandshakeException("private details")))
+    }
+    @Test fun transientPreinstallFailureRetainsApkAndRevalidatesBeforeExplicitRetry() = runTest {
+        val dispatcher = StandardTestDispatcher(testScheduler); Dispatchers.setMain(dispatcher)
+        try {
+            val controller = coordinator(this, dispatcher)
+            controller.startSelfUpdate(); advanceUntilIdle(); controller.confirmPrepared()
+            remote = { _, _ -> throw GitHubFailure(503) }
+            controller.requestSelfInstall({ true }) { fail("No network authorization") }; advanceUntilIdle()
+            assertEquals(DownloadPhase.INSTALL_ERROR, controller.state.value.phase)
+            assertEquals(1, files.verifiedDirectory.listFiles()!!.size)
+            remote = { _, _ -> remoteCalls++ }
+            var delivered = false
+            controller.requestSelfInstall({ true }) { delivered = true }; advanceUntilIdle()
+            assertTrue(delivered)
+            assertEquals(DownloadPhase.INSTALLER_OPEN, controller.state.value.phase)
+        } finally { Dispatchers.resetMain() }
+    }
+    @Test fun cancellationDuringRetryDelayMakesNoFurtherRequests() = runTest {
+        var transfers = 0
+        val controller = coordinator(this, StandardTestDispatcher(testScheduler)) {
+            transfers++; throw java.net.SocketTimeoutException()
+        }
+        controller.startSelfUpdate(); runCurrent()
+        controller.cancel(); advanceUntilIdle()
+        assertEquals(1, transfers)
+        assertEquals(DownloadPhase.AVAILABLE, controller.state.value.phase)
+    }
+    @Test fun unreadablePreparedApkOffersDownloadAgainAndNeverOpensInstaller() = runTest {
+        val dispatcher = StandardTestDispatcher(testScheduler); Dispatchers.setMain(dispatcher)
+        try {
+            var unreadable = false
+            val candidate = ownCandidate()
+            val controller = DownloadCoordinator(this, { null }, DownloadFiles(temp.newFolder()) { Long.MAX_VALUE },
+                binaryClient { binaryResponse(it, APK_BYTES) }, { _, _ -> }, ArchiveInspector {
+                    if (unreadable) throw java.io.IOException("private path")
+                    ArchiveMetadata(candidate.packageName, "0.2", 2)
+                }, { TEST_NOW }, dispatcher, InstalledApplications { ownInstalled() }, { candidate }, { _, _ -> })
+            controller.startSelfUpdate(); advanceUntilIdle(); controller.confirmPrepared()
+            unreadable = true
+            controller.requestSelfInstall({ true }) { fail("Unreadable archive") }; advanceUntilIdle()
+            assertEquals(DownloadPhase.ERROR, controller.state.value.phase)
+            assertTrue(controller.state.value.message!!.contains("Vuelve a descargarlo"))
+            assertFalse(controller.state.value.message!!.contains("private path"))
+        } finally { Dispatchers.resetMain() }
+    }
 }

@@ -17,15 +17,19 @@ interface CatalogCache {
 
 /** Private, versioned JSON. Failed writes leave the previous file intact. */
 class FileCatalogCache(private val directory: File) : CatalogCache {
-    @Synchronized override fun load(): CatalogSnapshot? = read("catalog-v1.json", 4 * 1024 * 1024) {
-        catalogJson.decodeFromString<CatalogSnapshot>(it).let { snapshot ->
-            // Una instalación anterior puede conservar RobStore como ficha en caché.
-            snapshot.copy(apps = snapshot.apps.filterNot(::isStoreCatalogEntry))
-        }.takeIf(CatalogValidation::snapshot)
+    @Synchronized override fun load(): CatalogSnapshot? {
+        val saved = read("catalog-v1.json", 4 * 1024 * 1024) {
+            catalogJson.decodeFromString<CatalogSnapshot>(it)
+        } ?: return null
+        val snapshot = saved.copy(apps = saved.apps.filterNot(::isStoreCatalogEntry))
+            .takeIf(CatalogValidation::snapshot) ?: return null
+        // Migrate the file too. A full/read-only disk must not hide the remaining apps.
+        if (snapshot != saved) try { save(snapshot) } catch (_: java.io.IOException) { }
+        return snapshot
     }
     @Synchronized override fun save(snapshot: CatalogSnapshot) {
         require(snapshot.schemaVersion == 1)
-        write("catalog-v1.json", catalogJson.encodeToString(snapshot), 4 * 1024 * 1024)
+        write("catalog-v1.json", catalogJson.encodeToString(snapshot.copy(apps = snapshot.apps.filterNot(::isStoreCatalogEntry))), 4 * 1024 * 1024)
     }
     @Synchronized override fun readGate(): RefreshGate = read("refresh-v1.json", 1024) {
         catalogJson.decodeFromString<RefreshGate>(it)

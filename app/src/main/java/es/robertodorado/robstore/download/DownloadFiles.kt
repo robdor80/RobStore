@@ -48,7 +48,7 @@ internal class DownloadFiles(root: File,
                     progress(0, app.apk.size)
                     while (true) {
                         cancellation.check()
-                        if (System.nanoTime() - started > TimeLimit.NANOS) throw IOException("Se agotó el tiempo de descarga.")
+                        if (System.nanoTime() - started > TimeLimit.NANOS) throw java.net.SocketTimeoutException("Se agotó el tiempo de descarga.")
                         val count = input.read(buffer)
                         if (count == -1) break
                         if (received + count > app.apk.size || received + count > CatalogPolicy.MAX_APK_BYTES) {
@@ -60,7 +60,7 @@ internal class DownloadFiles(root: File,
                         progress(received, app.apk.size)
                     }
                     cancellation.check()
-                    if (received != app.apk.size) throw DownloadSecurity("Archivo incompleto: tamaño distinto del esperado.")
+                    if (received != app.apk.size) throw IncompleteDownload()
                     output.fd.sync()
                 } }
             }

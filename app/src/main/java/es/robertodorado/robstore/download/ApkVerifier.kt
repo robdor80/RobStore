@@ -75,11 +75,14 @@ internal class PreparedApk private constructor(
             }
             token.check()
             val hash = digest.digest().joinToString("") { "%02x".format(it) }
-            if (app.apk.sha256 != null && !hash.equals(app.apk.sha256, true)) throw DownloadSecurity("SHA-256 distinto de la referencia oficial.")
+            if (app.apk.sha256 != null && !hash.equals(app.apk.sha256, true)) throw DownloadIntegrity()
             val metadata = inspector.inspect(file) ?: throw DownloadSecurity("Android no reconoce este APK.")
             if (metadata.packageName != app.packageName) throw DownloadSecurity("El paquete Android no coincide con el catálogo.")
             if (app.release.versionCode != null && metadata.versionCode != app.release.versionCode) {
                 throw DownloadSecurity("El versionCode del APK no coincide con el catálogo.")
+            }
+            if (app.release.versionName != null && metadata.versionName != app.release.versionName) {
+                throw DownloadSecurity("La versión del APK no coincide con la publicación.")
             }
             token.check()
             return hash to metadata

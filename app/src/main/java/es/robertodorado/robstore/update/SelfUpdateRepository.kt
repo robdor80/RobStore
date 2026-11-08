@@ -9,6 +9,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import java.io.IOException
+import es.robertodorado.robstore.download.downloadFailureMessage
 
 @Serializable
 internal data class UpdateSnapshot(val schemaVersion: Int = 1, val checkedAt: Long, val candidate: SelfUpdateCandidate?)
@@ -94,7 +95,7 @@ internal class SelfUpdateRepository(
                 mutableState.value = state.value.copy(candidate = candidate, checkedAt = time, checking = false,
                     failed = false, message = null, nextCheckAt = manualBlockedUntil())
             } catch (_: InvalidMetadata) { failed("Información de actualización insuficiente o inconsistente.") }
-            catch (_: IOException) { failed("No se pudo comprobar la actualización. Se conserva la última información conocida.") }
+            catch (failure: IOException) { failed(downloadFailureMessage(failure) + " Se conserva la última información conocida.") }
         } finally { mutex.unlock() }
     }
     private fun failed(message: String) {

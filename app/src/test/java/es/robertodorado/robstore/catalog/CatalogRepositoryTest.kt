@@ -38,6 +38,17 @@ class CatalogRepositoryTest {
         assertNull(repository.state.value.snapshot); assertTrue(repository.state.value.failed)
         assertFalse(repository.state.value.loading); assertFalse(repository.state.value.refreshing)
     }
+    @Test fun transportFailureNeverExposesPrivateExceptionDetailsInCatalogUi() = runTest {
+        val cache = MemoryCache(fixtureSnapshot())
+        val transport = FixtureTransport().apply { intercept = { throw IOException("TOKEN_SECRET https://private.example /data/user/0") } }
+        val repository = CatalogRepository(cache, GitHubClient(transport, cache) { TEST_NOW }, { TEST_NOW }, StandardTestDispatcher(testScheduler))
+        repository.initialize(); repository.refresh()
+        val message = repository.state.value.message!!
+        assertFalse(message.contains("TOKEN_SECRET"))
+        assertFalse(message.contains("private.example"))
+        assertFalse(message.contains("/data/user"))
+        assertEquals(cache.snapshot, repository.state.value.snapshot)
+    }
     @Test fun manualRefreshIsRealThrottledAndDetectsNewRelease() = runTest {
         var time = TEST_NOW
         val cache = MemoryCache(fixtureSnapshot())

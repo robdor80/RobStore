@@ -78,9 +78,7 @@ internal class DownloadCoordinator(
                 validateRemote(app, token)
                 token.check(); ensureActive()
                 mutableState.value = mutableState.value.copy(phase = DownloadPhase.DOWNLOADING)
-                partial = files.receive(app, client, token) { received, expected ->
-                    if (!token.cancelled) mutableState.value = mutableState.value.copy(received = received, expected = expected)
-                }
+                partial = receive(app, token)
                 token.check(); ensureActive()
                 if (destination == DownloadTarget.SelfUpdate) validateRemote(app, token)
                 if (select(destination) != app) throw DownloadSecurity("El catálogo ha cambiado.")
@@ -98,10 +96,10 @@ internal class DownloadCoordinator(
                 mutableState.value = DownloadState(repositoryId = repositoryId, phase = DownloadPhase.SECURITY_ERROR,
                     message = if (destination == DownloadTarget.SelfUpdate) "La publicación de RobStore ha cambiado o es inconsistente. Comprueba de nuevo las actualizaciones."
                     else "Metadatos inconsistentes. Actualiza el catálogo antes de reintentar.")
-            } catch (_: DownloadSecurity) {
+            } catch (failure: DownloadSecurity) {
                 partial?.delete(); prepared?.file?.delete(); prepared = null
-                mutableState.value = DownloadState(repositoryId = repositoryId, phase = DownloadPhase.SECURITY_ERROR,
-                    message = "La descarga no supera los controles de seguridad. Archivo eliminado.")
+                mutableState.value = DownloadState(repositoryId = repositoryId, phase = if (failure is IncompleteDownload) DownloadPhase.ERROR else DownloadPhase.SECURITY_ERROR,
+                    message = downloadFailureMessage(failure))
             } catch (failure: IOException) {
                 partial?.delete(); prepared?.file?.delete(); prepared = null
                 mutableState.value = DownloadState(repositoryId = repositoryId, phase = if (token.cancelled) DownloadPhase.AVAILABLE else DownloadPhase.ERROR,
@@ -109,6 +107,26 @@ internal class DownloadCoordinator(
             }
         }.also { it.start() }
         return true
+    }
+    private suspend fun receive(app: ReleaseArtifact, token: DownloadCancellation): File {
+        for (attempt in 0..1) {
+            try {
+                return files.receive(app, client, token) { received, expected ->
+                    if (!token.cancelled) mutableState.value = mutableState.value.copy(received = received, expected = expected)
+                }
+            } catch (failure: IOException) {
+                token.check()
+                if (attempt == 1 || !retryableTransfer(failure)) throw failure
+                mutableState.value = mutableState.value.copy(phase = DownloadPhase.CHECKING, received = 0,
+                    message = "La transferencia se ha interrumpido. Comprobando la publicación antes de reintentar…")
+                delay(1_000)
+                // Start again from the official URL after fresh authorization; never reuse CDN URLs or partial bytes.
+                validateRemote(app, token)
+                token.check()
+                mutableState.value = mutableState.value.copy(phase = DownloadPhase.DOWNLOADING, message = null)
+            }
+        }
+        error("Unreachable transfer state")
     }
     @Synchronized fun confirmPrepared() {
         if (state.value.phase in setOf(DownloadPhase.OFFICIAL_VERIFIED, DownloadPhase.NO_OFFICIAL_SHA)) {
@@ -156,7 +174,17 @@ internal class DownloadCoordinator(
                 mutableState.value = DownloadState(repositoryId = repositoryId, message = "Preparación cancelada.")
             } catch (_: DownloadSecurity) { blockedInstall(repositoryId) }
             catch (_: InvalidMetadata) { blockedInstall(repositoryId) }
-            catch (_: IOException) { blockedInstall(repositoryId) }
+            catch (failure: IOException) {
+                // A failed online check is recoverable; it must never hand the APK to Android.
+                if (apk.file.isFile) {
+                    mutableState.value = state.value.copy(phase = DownloadPhase.INSTALL_ERROR,
+                        message = downloadFailureMessage(failure) + " Pulsa Instalar para comprobarlo de nuevo.")
+                } else {
+                    prepared = null
+                    mutableState.value = DownloadState(repositoryId = repositoryId, phase = DownloadPhase.ERROR,
+                        message = "No se pudo volver a leer el APK preparado. Vuelve a descargarlo antes de instalar.")
+                }
+            }
             catch (_: SecurityException) { installationError() }
             catch (_: IllegalArgumentException) { installationError() }
         }.also { it.start() }
@@ -179,7 +207,8 @@ internal class DownloadCoordinator(
         }
     }
     fun installerReturned() {
-        if (state.value.phase == DownloadPhase.INSTALLER_OPEN) mutableState.value = state.value.copy(phase = DownloadPhase.UNCONFIRMED)
+        if (state.value.phase == DownloadPhase.INSTALLER_OPEN) mutableState.value = state.value.copy(phase = DownloadPhase.UNCONFIRMED,
+            message = "Si cancelaste la instalación, puedes pulsar Instalar para reintentarlo. Si Android indicó un error de firma o compatibilidad, conserva la app instalada y comprueba la publicación oficial.")
     }
     fun installationError() {
         if (prepared != null) mutableState.value = state.value.copy(phase = DownloadPhase.INSTALL_ERROR,
