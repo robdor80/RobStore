@@ -7,6 +7,8 @@ import java.io.IOException
 import java.util.UUID
 
 /** Private paths are generated locally, never from a remote filename. A single coordinator owns this directory. */
+internal class InsufficientDownloadStorage : IOException("Espacio privado insuficiente.")
+
 internal class DownloadFiles(root: File,
     private val output: (File) -> FileOutputStream = { FileOutputStream(it) },
     private val available: (File) -> Long = { it.usableSpace },
@@ -30,7 +32,7 @@ internal class DownloadFiles(root: File,
         return File(directory, "${UUID.randomUUID()}.part")
     }
     fun space(required: Long) {
-        if (available(directory) < required + RESERVE) throw IOException("Espacio privado insuficiente. Libera espacio y reintenta.")
+        if (available(directory) < required + RESERVE) throw InsufficientDownloadStorage()
     }
     fun receive(app: ReleaseArtifact, client: BinaryClient, cancellation: DownloadCancellation,
         progress: (Long, Long) -> Unit): File {

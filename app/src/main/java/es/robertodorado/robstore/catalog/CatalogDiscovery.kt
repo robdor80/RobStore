@@ -15,9 +15,12 @@ internal class CatalogDiscovery(private val client: GitHubClient, private val no
                 if (topics.none { (it as? JsonPrimitive)?.takeIf { primitive -> primitive.isString }?.content == CatalogPolicy.TOPIC }) continue
                 val name = repository.string("name")
                 if (!safeRepository(name)) throw InvalidMetadata("Nombre de repositorio incorrecto")
+                // La tienda tiene su propio canal de actualización; no consume cuota del catálogo.
+                if (name == "RobStore") continue
                 val repoUrl = "https://github.com/${CatalogPolicy.OWNER}/$name"
                 if (repository.string("html_url") != repoUrl) throw InvalidMetadata("Origen del repositorio incorrecto")
-                apps += application(session, id, name, repoUrl)
+                val app = application(session, id, name, repoUrl)
+                if (!isStoreCatalogEntry(app)) apps += app
             } catch (invalid: InvalidMetadata) {
                 // Only contract errors exclude an individual repo. Transport and incomplete pages abort the snapshot.
                 session.diagnostics += "Repositorio $id: ${invalid.message}"

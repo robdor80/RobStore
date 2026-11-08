@@ -44,16 +44,10 @@ data class SelfUpdateCandidate(
 internal class SelfUpdateDiscovery(private val client: GitHubClient, private val now: () -> Long = System::currentTimeMillis) {
     fun fetch(channel: SelfUpdateChannel): SelfUpdateCandidate? {
         val session = client.discovery()
-        val repo = session.repository("RobStore")
-        if (repo.string("full_name") != "robdor80/RobStore" || repo.string("name") != "RobStore" ||
-            (repo["owner"] as? JsonObject)?.string("login") != CatalogPolicy.OWNER || repo.boolean("private") ||
-            repo.boolean("archived") || repo.string("visibility") != "public" ||
-            repo.string("html_url") != "https://github.com/robdor80/RobStore" || repo.long("id") <= 0) {
-            throw InvalidMetadata("Origen de autoactualización incorrecto")
-        }
+        val repositoryId = verifiedRepository(session)
         var invalidPublication = false
         val candidates = session.releases("RobStore").mapNotNull { release ->
-            try { candidate(session, repo.long("id"), release, channel) }
+            try { candidate(session, repositoryId, release, channel) }
             catch (_: InvalidMetadata) { invalidPublication = true; null }
         }
         if (candidates.isEmpty() && invalidPublication) throw InvalidMetadata("Información de publicación insuficiente o incorrecta")
@@ -63,10 +57,29 @@ internal class SelfUpdateDiscovery(private val client: GitHubClient, private val
             ?: throw InvalidMetadata("Publicaciones ambiguas para versionCode")
     }
 
-    fun revalidate(candidate: SelfUpdateCandidate) {
-        if (!candidate.valid() || fetch(candidate.channel) != candidate) {
+    fun revalidate(selected: SelfUpdateCandidate) {
+        if (!selected.valid()) throw InvalidMetadata("Actualización propia no válida")
+        val session = client.discovery()
+        val repositoryId = verifiedRepository(session)
+        // Solo la Release elegida necesita revisarse otra vez. Leer los contratos de
+        // todas las Releases históricas en cada fase agotaba la cuota anónima de GitHub.
+        // La firma, hash, contrato y versión siguen validándose antes de instalar.
+        val release = session.releases("RobStore").singleOrNull { it.long("id") == selected.release.id }
+            ?: throw InvalidMetadata("La Release seleccionada ya no está publicada")
+        if (candidate(session, repositoryId, release, selected.channel) != selected) {
             throw InvalidMetadata("La Release o el contrato de actualización ha cambiado")
         }
+    }
+
+    private fun verifiedRepository(session: GitHubClient.Discovery): Long {
+        val repo = session.repository("RobStore")
+        if (repo.string("full_name") != "robdor80/RobStore" || repo.string("name") != "RobStore" ||
+            (repo["owner"] as? JsonObject)?.string("login") != CatalogPolicy.OWNER || repo.boolean("private") ||
+            repo.boolean("archived") || repo.string("visibility") != "public" ||
+            repo.string("html_url") != "https://github.com/robdor80/RobStore" || repo.long("id") <= 0) {
+            throw InvalidMetadata("Origen de autoactualización incorrecto")
+        }
+        return repo.long("id")
     }
 
     private fun candidate(session: GitHubClient.Discovery, repositoryId: Long, release: JsonObject,

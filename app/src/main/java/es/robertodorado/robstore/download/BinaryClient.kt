@@ -9,6 +9,7 @@ import okhttp3.*
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 
 internal class DownloadSecurity(message: String) : IOException(message)
+internal class DownloadHttpFailure(val status: Int) : IOException("HTTP $status en descarga de APK")
 
 /** Explicit allowlist, never suffix matching. CDN queries are accepted only after an official redirect. */
 internal object BinaryOrigin {
@@ -82,7 +83,7 @@ internal class BinaryClient(client: OkHttpClient = OkHttpClient()) {
                 return BinaryResponse(response)
             }
             response.use {
-                if (response.code !in setOf(301, 302, 303, 307, 308)) throw IOException("Descarga: HTTP ${response.code}. Reintenta manualmente.")
+                if (response.code !in setOf(301, 302, 303, 307, 308)) throw DownloadHttpFailure(response.code)
                 if (++redirects > 3) throw DownloadSecurity("Demasiadas redirecciones.")
                 url = BinaryOrigin.redirect(url, response.header("Location") ?: throw DownloadSecurity("Redirección sin destino."))
             }

@@ -23,6 +23,17 @@ class CatalogDiscoveryTest {
         assertEquals(listOf(10L), fetch().apps.map { it.repositoryId })
         assertEquals(4, transport.requests.size)
     }
+    @Test fun ownStoreIsExcludedEvenWhenItHasTheCatalogTopic() {
+        transport.repos = listOf(fixtureRepo(12, name = "RobStore"), fixtureRepo())
+        val snapshot = fetch()
+        assertEquals(listOf("Demo"), snapshot.apps.map { it.repositoryName })
+        assertEquals(4, transport.requests.size)
+        assertFalse(transport.requests.any { it.url.encodedPath.contains("/RobStore/releases") })
+    }
+    @Test fun ownStorePackageCannotAppearThroughAnotherRepository() {
+        transport.manifest = fixtureManifest("packageName" to JsonPrimitive("es.robertodorado.robstore"))
+        assertTrue(fetch().apps.isEmpty())
+    }
     @Test fun paginatesRepositoriesAndReleasesAndAssets() {
         transport.repos = (1..100).map { fixtureRepo(it.toLong(), topics = emptyList()) } + fixtureRepo(101)
         transport.releases = (1..101).map { fixtureRelease(it.toLong(), draft = it < 101) }

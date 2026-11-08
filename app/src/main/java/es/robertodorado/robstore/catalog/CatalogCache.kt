@@ -18,7 +18,10 @@ interface CatalogCache {
 /** Private, versioned JSON. Failed writes leave the previous file intact. */
 class FileCatalogCache(private val directory: File) : CatalogCache {
     @Synchronized override fun load(): CatalogSnapshot? = read("catalog-v1.json", 4 * 1024 * 1024) {
-        catalogJson.decodeFromString<CatalogSnapshot>(it).takeIf(CatalogValidation::snapshot)
+        catalogJson.decodeFromString<CatalogSnapshot>(it).let { snapshot ->
+            // Una instalación anterior puede conservar RobStore como ficha en caché.
+            snapshot.copy(apps = snapshot.apps.filterNot(::isStoreCatalogEntry))
+        }.takeIf(CatalogValidation::snapshot)
     }
     @Synchronized override fun save(snapshot: CatalogSnapshot) {
         require(snapshot.schemaVersion == 1)
