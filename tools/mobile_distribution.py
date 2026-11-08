@@ -217,13 +217,13 @@ def increasing(repo, contract):
         d.increasing(contract, dict(channel='release', packageName=baseline['packageName'], versionCode=baseline['versionCode']))
     releases = [release for release in pages(f'repos/{repo}/releases')
                 if not release['draft'] and release['prerelease'] == (contract['channel'] == 'dev')]
-    # Once adopted, the latest RS-05 contract carries the growing Android versionCode.
+    # Publication dates can change. Every published version remains a versionCode floor.
     releases.sort(key=lambda release: release.get('published_at') or '', reverse=True)
     for release in releases:
         body = raw_file(repo, 'refs/tags/' + release['tag_name'], d.CONTRACT, missing_ok=True)
         if body is not None:
             d.increasing(contract, json.loads(body))
-            break
+            continue
         original = next((baseline for baseline in baselines if baseline['tag'] == release['tag_name']), None)
         previous = (dict(channel='release', packageName=original['packageName'], versionCode=original['versionCode'])
                     if original else previous_apk(repo, release, contract))
@@ -336,6 +336,70 @@ def publication_files(settings, source, contract, receipt):
     return files
 
 
+def publication_commit(repo, tag):
+    reference = api(f'repos/{repo}/git/ref/tags/{quote(tag, safe="")}')['object']
+    for _ in range(4):
+        if reference['type'] == 'commit':
+            return reference['sha']
+        d.require(reference['type'] == 'tag', 'Invalid publication tag object')
+        reference = api(f'repos/{repo}/git/tags/{reference["sha"]}')['object']
+    d.require(reference['type'] == 'commit', 'Invalid publication tag chain')
+    return reference['sha']
+
+
+def reusable_closure(args, settings, contract, receipt, draft):
+    """An existing tag is immutable, including after a failed publication or a withdrawn Release."""
+    d.require(draft is not None and draft['draft'] and draft['prerelease'] == (args.channel == 'dev'),
+              'Existing tag has no compatible unpublished draft; refusing to move or replace it')
+    repo = settings['repository']
+    ref = 'refs/tags/' + args.tag
+    previous_contract = json.loads(raw_file(repo, ref, d.CONTRACT))
+    d.validate_contract(previous_contract, contract)
+    previous_receipt = json.loads(raw_file(repo, ref, d.RECEIPT))
+    previous_run = previous_receipt.get('preparationRun', '')
+    d.require(isinstance(previous_run, str) and previous_run.isdecimal() and int(previous_run) > 0 and
+              dict(previous_receipt, preparationRun=receipt['preparationRun']) == receipt,
+              'Existing tag belongs to a different source, signer or APK; draft retained')
+    commit = publication_commit(repo, args.tag)
+    metadata = api(f'repos/{repo}/git/commits/{commit}')
+    d.require([parent['sha'] for parent in metadata['parents']] == [args.source], 'Existing closure source mismatch')
+    files = publication_files(settings, args.source, contract, previous_receipt)
+    changed = api(f'repos/{repo}/compare/{args.source}...{commit}')
+    d.require(len(changed['commits']) == 1 and changed['files'] and
+              all(f['filename'] in files and f['status'] in ('added', 'modified') for f in changed['files']),
+              'Existing closure changed application code or resources')
+    for name, expected in files.items():
+        content = api(f'repos/{repo}/contents/{name}?ref={commit}')
+        d.require(content['encoding'] == 'base64' and
+                  base64.b64decode(content['content']) == (expected if isinstance(expected, bytes) else expected.encode()),
+                  'Existing publication closure differs; refusing to replace it')
+    return commit
+
+
+def upload_draft_file(repo, release_id, tag, file):
+    """Reuse exact uploaded bytes; only an empty, unfinished draft asset may be removed."""
+    expected_digest = 'sha256:' + d.digest(file)
+    for attempt in range(3):
+        release = api(f'repos/{repo}/releases/{release_id}')
+        d.require(release['draft'] and release['tag_name'] == tag, 'Release is no longer the selected draft')
+        matches = [asset for asset in release['assets'] if asset['name'] == file.name]
+        d.require(len(matches) <= 1, 'Ambiguous draft assets')
+        if matches:
+            asset = matches[0]
+            if asset['state'] == 'uploaded':
+                d.require(asset['size'] == file.stat().st_size and asset.get('digest') == expected_digest,
+                          'Existing draft asset differs; refusing to overwrite it')
+                return
+            d.require(asset['state'] == 'starter' and asset['size'] == 0, 'Unexpected incomplete draft asset')
+            api(f'repos/{repo}/releases/assets/{asset["id"]}', 'DELETE')
+        result = subprocess.run(['gh', 'release', 'upload', tag, str(file), '--repo', repo], capture_output=True)
+        if result.returncode == 0:
+            return
+        if attempt < 2:
+            time.sleep(2)
+    raise ValueError('Upload failed after automatic retries; the verified draft can resume from RobPublisher')
+
+
 def publish(args):
     # Recheck the explicit order and source before writing; no rebuild or signing here.
     guard(args)
@@ -346,6 +410,7 @@ def publish(args):
     existing_tags = {tag['name'] for tag in pages(f'repos/{repo}/tags')}
     d.require(args.tag not in [b['name'] for b in pages(f'repos/{repo}/branches')], 'Tag name collides with a branch')
     matches = [release for release in pages(f'repos/{repo}/releases') if release['tag_name'] == args.tag]
+    d.require(len(matches) <= 1, 'Ambiguous publication Releases')
     d.require(not any(not release['draft'] for release in matches), 'This version is already published')
     draft = matches[0] if matches else None
     try:
@@ -356,48 +421,54 @@ def publish(args):
         notes = settings['name'] + ' ' + args.tag
     files = publication_files(settings, args.source, contract, receipt)
     d.require(set(files).issubset(CLOSURE_FILES), 'Only publication closure files may change')
+    reuse_commit = reusable_closure(args, settings, contract, receipt, draft) if args.tag in existing_tags else None
+    d.require(reuse_commit is not None or draft is None, 'Draft has no verifiable tag; refusing to replace its publication')
     if not args.execute:
         print('DRY PLAN: validated candidate; no commit, tag, Release or upload created')
         return
-    source = api(f'repos/{repo}/git/commits/{args.source}')
-    entries = []
-    for name, body in files.items():
-        blob = api(f'repos/{repo}/git/blobs', 'POST', dict(content=base64.b64encode(body if isinstance(body, bytes) else body.encode()).decode(), encoding='base64'))
-        entries.append(dict(path=name, mode='100644', type='blob', sha=blob['sha']))
-    tree = api(f'repos/{repo}/git/trees', 'POST', dict(base_tree=source['tree']['sha'], tree=entries))
-    commit = api(f'repos/{repo}/git/commits', 'POST', dict(message=f"Prepare verified Android distribution {args.tag}; built from {args.source}", tree=tree['sha'], parents=[args.source]))
-    changed = api(f'repos/{repo}/compare/{args.source}...{commit["sha"]}')
-    d.require(changed['commits'] and all(f['filename'] in files and f['status'] in ('added', 'modified') for f in changed['files']), 'Closure commit changed code/resources')
+    if args.tag in existing_tags:
+        commit_sha = reuse_commit
+    else:
+        source = api(f'repos/{repo}/git/commits/{args.source}')
+        entries = []
+        for name, body in files.items():
+            blob = api(f'repos/{repo}/git/blobs', 'POST', dict(content=base64.b64encode(body if isinstance(body, bytes) else body.encode()).decode(), encoding='base64'))
+            entries.append(dict(path=name, mode='100644', type='blob', sha=blob['sha']))
+        tree = api(f'repos/{repo}/git/trees', 'POST', dict(base_tree=source['tree']['sha'], tree=entries))
+        commit_sha = api(f'repos/{repo}/git/commits', 'POST', dict(message=f"Prepare verified Android distribution {args.tag}; built from {args.source}", tree=tree['sha'], parents=[args.source]))['sha']
+        changed = api(f'repos/{repo}/compare/{args.source}...{commit_sha}')
+        d.require(changed['commits'] and all(f['filename'] in files and f['status'] in ('added', 'modified') for f in changed['files']), 'Closure commit changed code/resources')
     d.require(api(f'repos/{repo}/branches/main')['commit']['sha'] == args.source, 'Main changed; no tag or Release created')
     # No branch is moved. The tag makes this closure commit reachable.
-    tag = api(f'repos/{repo}/git/tags', 'POST', dict(tag=args.tag, message=f"Signed APK SHA-256 {contract['sha256']}; source {args.source}", object=commit['sha'], type='commit'))
-    if args.tag in existing_tags:
-        # Only unpublished tags reach this point; retry without asking for manual cleanup.
-        api(f'repos/{repo}/git/refs/tags/{args.tag}', 'PATCH', dict(sha=tag['sha'], force=True))
-    else:
+    if args.tag not in existing_tags:
+        tag = api(f'repos/{repo}/git/tags', 'POST', dict(tag=args.tag, message=f"Signed APK SHA-256 {contract['sha256']}; source {args.source}", object=commit_sha, type='commit'))
         api(f'repos/{repo}/git/refs', 'POST', dict(ref='refs/tags/' + args.tag, sha=tag['sha']))
-    metadata = dict(tag_name=args.tag, target_commitish=commit['sha'], name=args.tag,
-        body=notes + f"\n\nSource: `{args.source}`\nPublication commit: `{commit['sha']}`\nAPK SHA-256: `{contract['sha256']}`\n",
+    metadata = dict(tag_name=args.tag, target_commitish=commit_sha, name=args.tag,
+        body=notes + f"\n\nSource: `{args.source}`\nPublication commit: `{commit_sha}`\nAPK SHA-256: `{contract['sha256']}`\n",
         draft=True, prerelease=args.channel == 'dev')
     if draft:
-        api(f'repos/{repo}/releases/{draft["id"]}', 'PATCH', metadata)
         release = draft
     else:
         release = api(f'repos/{repo}/releases', 'POST', metadata)
     for file in (apk, Path(args.directory) / 'SHA256SUMS'):
-        for attempt in range(3):
-            result = subprocess.run(['gh', 'release', 'upload', args.tag, str(file), '--repo', repo, '--clobber'], capture_output=True)
-            if result.returncode == 0:
-                break
-            if attempt < 2:
-                time.sleep(2)
-        d.require(result.returncode == 0, 'Upload failed after automatic retries; the draft can resume from RobPublisher')
+        upload_draft_file(repo, release['id'], args.tag, file)
     uploaded = api(f'repos/{repo}/releases/{release["id"]}')
+    d.require(uploaded['draft'] and uploaded['tag_name'] == args.tag and
+              uploaded['prerelease'] == (args.channel == 'dev'), 'Publication changed before final verification')
+    d.require({asset['name'] for asset in uploaded['assets']} == {apk.name, 'SHA256SUMS'},
+              'Unexpected publication assets; draft retained')
     assets = [a for a in uploaded['assets'] if a['name'] == apk.name]
     d.require(len(assets) == 1 and assets[0]['state'] == 'uploaded' and assets[0]['size'] == apk.stat().st_size and
               assets[0].get('digest') == 'sha256:' + contract['sha256'], 'Uploaded APK digest mismatch; draft retained')
+    checksum = Path(args.directory) / 'SHA256SUMS'
+    checksums = [a for a in uploaded['assets'] if a['name'] == checksum.name]
+    d.require(len(checksums) == 1 and checksums[0]['state'] == 'uploaded' and
+              checksums[0]['size'] == checksum.stat().st_size and checksums[0].get('digest') == 'sha256:' + d.digest(checksum),
+              'Uploaded checksum manifest mismatch; draft retained')
     tagged = json.loads(raw_file(repo, 'refs/tags/' + args.tag, d.CONTRACT))
     d.validate_contract(tagged, contract)
+    d.require(publication_commit(repo, args.tag) == commit_sha, 'Publication tag changed; draft retained')
+    increasing(repo, contract)
     d.require(api(f'repos/{repo}/branches/main')['commit']['sha'] == args.source, 'Main changed; the next order can resume the unpublished draft')
     api(f'repos/{repo}/releases/{release["id"]}', 'PATCH', dict(draft=False))
     print('Authorized publication completed: ' + release['html_url'])
