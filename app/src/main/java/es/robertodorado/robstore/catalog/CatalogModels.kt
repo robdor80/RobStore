@@ -84,3 +84,8 @@ class GitHubFailure(val status: Int, val retryAt: Long = 0) : java.io.IOExceptio
     if (retryAt > 0) "GitHub limita las solicitudes; espera hasta el próximo intento permitido."
     else "GitHub devolvió HTTP $status.",
 )
+
+/** RobStore se actualiza exclusivamente desde Ajustes, nunca como app del catálogo. */
+internal fun isStoreCatalogEntry(app: CatalogApp): Boolean =
+    app.repositoryName == "RobStore" ||
+        app.packageName in setOf("es.robertodorado.robstore", "es.robertodorado.robstore.debug")
