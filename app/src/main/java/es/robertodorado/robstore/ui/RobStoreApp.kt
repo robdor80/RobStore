@@ -49,7 +49,7 @@ object RobRoutes {
 }
 
 @Composable
-fun RobStoreApp(nav: NavHostController = rememberNavController(), state: CatalogState = CatalogState(loading = false),
+internal fun RobStoreApp(nav: NavHostController = rememberNavController(), state: CatalogState = CatalogState(loading = false),
     onRefresh: () -> Unit = {}, download: DownloadState = DownloadState(),
     onDownload: (Long) -> Unit = {}, onCancel: () -> Unit = {}, onConfirm: () -> Unit = {},
     onInstall: (Long) -> Unit = {}, onPermission: () -> Unit = {},
@@ -268,7 +268,7 @@ internal fun RobSyncIndicator(state: CatalogState, technical: Boolean = false, c
 }
 
 @Composable
-fun SettingsScreen(onBack: () -> Unit, state: CatalogState = CatalogState(loading = false),
+internal fun SettingsScreen(onBack: () -> Unit, state: CatalogState = CatalogState(loading = false),
     selfUpdate: SelfUpdateState = SelfUpdateState(), download: DownloadState = DownloadState(),
     onCheck: () -> Unit = {}, onDownload: () -> Unit = {}, onCancel: () -> Unit = {},
     onConfirm: () -> Unit = {}, onInstall: () -> Unit = {}, onPermission: () -> Unit = {},
