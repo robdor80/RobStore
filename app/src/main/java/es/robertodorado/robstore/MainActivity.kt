@@ -33,6 +33,7 @@ class MainActivity : ComponentActivity() {
                 val download by model.downloadState.collectAsStateWithLifecycle()
                 val installed by model.installedState.collectAsStateWithLifecycle()
                 val selfUpdate by model.selfUpdateState.collectAsStateWithLifecycle()
+                val githubAuth by model.githubAuthState.collectAsStateWithLifecycle()
                 val openMessage by model.openMessage.collectAsStateWithLifecycle()
                 val installer = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {
                     // ACTION_VIEW results are not reliable proof of installation or cancellation.
@@ -46,7 +47,9 @@ class MainActivity : ComponentActivity() {
                     model.refreshInstalled()
                 }
                 CompositionLocalProvider(LocalCatalogIcons provides model.icons) {
-                    RobStoreApp(selfUpdate = selfUpdate, onCheckSelfUpdate = model::checkSelfUpdate,
+                    RobStoreApp(githubAuth = githubAuth, onConnectGitHub = model::connectGitHub,
+                        onCancelGitHub = model::cancelGitHubConnection, onDisconnectGitHub = model::disconnectGitHub,
+                        selfUpdate = selfUpdate, onCheckSelfUpdate = model::checkSelfUpdate,
                         onDownloadSelfUpdate = model::downloadSelfUpdate,
                         onInstallSelfUpdate = { model.installSelfUpdate { launchSystemActivity(it, { intent -> installer.launch(intent) }, model::installationError) } },
                         state = state, onRefresh = model::refresh, download = download,
