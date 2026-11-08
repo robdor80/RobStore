@@ -5,6 +5,8 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import java.io.File
 import es.robertodorado.robstore.update.*
+import es.robertodorado.robstore.auth.*
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -32,10 +34,33 @@ class CatalogViewModel internal constructor(
         application, AndroidInstalledApplications(application.packageManager), Dispatchers.IO,
     )
     private val cache = FileCatalogCache(File(application.filesDir, "catalog"))
-    private val client = GitHubClient(CatalogRuntime.transportFactory(), cache)
+    private val auth = GitHubAuthManager(GitHubCredentialStore(application))
+    val githubAuthState = auth.state
+    private var authorizationJob: Job? = null
+    private val client = GitHubClient(GitHubAuthenticatedTransport(CatalogRuntime.transportFactory(), auth), cache)
     private val repository = CatalogRepository(cache, client, io = io)
     internal val icons = CatalogIconLoader(File(application.cacheDir, "catalog-icons"), client)
     val state = repository.state
+    fun connectGitHub() {
+        if (authorizationJob?.isActive == true) return
+        authorizationJob = viewModelScope.launch {
+            if (auth.authorize()) {
+                // Cambio de límite anónimo a autenticado: descartar bloqueo de la cuota anterior.
+                cache.updateGate { it.copy(blockedUntil = 0) }
+                repository.refresh(manual = true)
+                updates.check(manual = true)
+            }
+        }
+    }
+    fun cancelGitHubConnection() {
+        authorizationJob?.cancel()
+        auth.cancelAuthorization()
+    }
+    fun disconnectGitHub() {
+        authorizationJob?.cancel()
+        auth.disconnect()
+        cache.updateGate { it.copy(blockedUntil = 0) }
+    }
     private val inventory = CatalogInventory(applications, io)
     val installedState = inventory.state
     private val installer = AndroidInstaller(application)
@@ -54,11 +79,11 @@ class CatalogViewModel internal constructor(
     private val downloads = DownloadCoordinator(viewModelScope, { state.value.snapshot },
         DownloadFiles(File(application.filesDir, "apk-downloads")), BinaryClient(),
         { app, token ->
-            val transport = OkHttpTransport(onCall = token::attach)
+            val transport = GitHubAuthenticatedTransport(OkHttpTransport(onCall = token::attach), auth)
             CatalogDiscovery(GitHubClient(transport, cache), System::currentTimeMillis).revalidate(app)
         }, AndroidArchiveInspector(application.packageManager), applications = applications,
         selfUpdate = updates::selected, revalidateSelf = { candidate, token ->
-            SelfUpdateDiscovery(GitHubClient(OkHttpTransport(onCall = token::attach), cache)).revalidate(candidate)
+            SelfUpdateDiscovery(GitHubClient(GitHubAuthenticatedTransport(OkHttpTransport(onCall = token::attach), auth), cache)).revalidate(candidate)
         })
     val downloadState = downloads.state
     private fun catalogTarget(repositoryId: Long) = state.value.snapshot?.apps?.find {
@@ -95,7 +120,7 @@ class CatalogViewModel internal constructor(
         updates.observeInstalled()
     } }
     fun installationError() = downloads.installationError()
-    override fun onCleared() { downloads.close(); super.onCleared() }
+    override fun onCleared() { authorizationJob?.cancel(); downloads.close(); super.onCleared() }
 
     init {
         viewModelScope.launch {
